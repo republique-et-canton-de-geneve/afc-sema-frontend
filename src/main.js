@@ -22,16 +22,14 @@ async function bootstrap() {
     components,
     directives,
     theme: {
-      defaultTheme: 'dark',
+      defaultTheme: 'light',
       themes: {
-        dark: {
-          colors: {
-            primary: '#1976D2',
-          },
-        },
         light: {
           colors: {
-            primary: '#1976D2',
+            primary:    '#1565C0',
+            navbar:     '#1a3a5c',
+            background: '#F0F2F5',
+            surface:    '#FFFFFF',
           },
         },
       },

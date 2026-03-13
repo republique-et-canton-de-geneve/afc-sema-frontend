@@ -1,0 +1,8 @@
+include:
+    - project: "DEVELOPPEUR-AFC/urbafc/commun/gitlab-ci"
+      ref: master
+      file: ".gitlab-ci-frontend-node.yml"
+
+restart-openshift-deployment:
+    rules:
+        - when: never

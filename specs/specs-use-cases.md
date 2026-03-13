@@ -1,4 +1,4 @@
-# Spécifications - Application de Monitoring Inbox/Outbox
+# Spécifications - Application d'exploitation Inbox/Outbox
 
 ## 1. Contexte et Objectifs
 
@@ -11,10 +11,10 @@ Chaque application utilise le pattern inbox/outbox pour garantir la fiabilité d
 - **Inbox** : Messages entrants à traiter
 - **Outbox** : Messages sortants à envoyer
 
-Ces tables techniques sont réparties sur environ 20 bases de données (Oracle et PostgreSQL).
+SEMA est déployé **au sein de chaque domaine applicatif**, au plus près de la base de données de l'application. Chaque instance accède directement à **une seule datasource** : la base de l'application du domaine.
 
 ### Objectifs
-Développer une application de monitoring permettant de **visualiser à la demande** l'état des messages dans les tables inbox/outbox, notamment :
+Développer un outil d'exploitation du domaine permettant de **visualiser à la demande** l'état des messages dans les tables inbox/outbox de l'application, notamment :
 - Nombre de messages par statut (A_TRAITER, EN_TRAITEMENT, TRAITE, EN_ERREUR, etc.)
 - Consultation détaillée des messages en erreur
 - Rejeu manuel des messages (unitaire ou par lot)
@@ -27,25 +27,15 @@ Développer une application de monitoring permettant de **visualiser à la deman
 
 ### 2.1 Visualisation des Données
 
-#### Vue d'ensemble (Niveau 1)
-- Affichage d'un tableau récapitulatif de toutes les applications
-- Pour chaque application : nombre de messages par statut, pour inbox et outbox
-  - Cellule affichée `—` si la direction n'est pas applicable (ex. app producteur → pas d'inbox)
-  - Cellule affichée `N/A` si la datasource est inaccessible
-- Colonnes affichées paramétrables par l'utilisateur (toggle) ; **par défaut seules les colonnes "Traité" et "En erreur" sont visibles**
-- **Clic sur une ligne** → navigation vers la liste des messages de l'application avec le filtre statut `EN_ERREUR` pré-sélectionné par défaut
-- **Clic sur un compteur EN_ERREUR** → même navigation (filtre `EN_ERREUR`)
-- Possibilité de filtrer par application spécifique via dropdown/select
-- Rafraîchissement manuel ou automatique (polling toutes les 5-10s si la page est active)
+#### Résumé inbox/outbox
+- Cards KPI affichées dès l'arrivée sur la page
+- Compteurs par statut (A_TRAITER, EN_TRAITEMENT, TRAITE, EN_ERREUR) pour chaque direction active
+- Clic sur un compteur → ouvre la liste avec le filtre correspondant pré-sélectionné
+- Rafraîchissement automatique indépendant de l'état de la liste
 
-#### Vue détaillée par application (Niveau 2)
-- Sélection d'une application dans le filtre
-- Affichage des compteurs détaillés par statut pour cette application uniquement
-- Temps de réponse quasi-instantané (1 seule datasource interrogée)
-
-#### Liste des messages (Niveau 3)
-- Consultation de la liste des messages d'une application
-- Filtrage par statut (focus sur les messages EN_ERREUR)
+#### Liste des messages (dépliable)
+- Consultation de la liste des messages de l'application
+- Filtrage par direction (inbox / outbox), statut, type de message
 - Affichage des **métadonnées uniquement** :
   - Identifiant (`DEO_IDENTIFIANT` / `DEI_TYPE_IDENTIFIANT`)
   - User (`DEO_UTILISATEUR` / `DEI_UTILISATEUR`)
@@ -56,18 +46,17 @@ Développer une application de monitoring permettant de **visualiser à la deman
 - Pagination (50-100 lignes par page)
 - Tri par timestamp (plus récents en premier)
 
-#### Détail d'un message (Niveau 4)
+#### Détail d'un message (Niveau 2)
 - Ouverture modal/drawer au clic sur une ligne
 - Affichage de toutes les métadonnées du message
-- **Message d'erreur non affiché en V1** (colonne absente — prévu en phase ultérieure)
-- **Le payload n'est pas affiché** (seulement les métadonnées)
+- **V1** : Pas de message d'erreur détaillé (colonne absente en base)
 
 ### 2.2 Fonctionnalités d'Administration
 
 #### Rejeu de messages
 - **Rejeu unitaire** : Bouton sur le détail d'un message
 - **Rejeu par lot** : Sélection multiple via checkboxes dans le tableau (limité à la page affichée)
-- **Rejeu par filtre** : Bouton "Rejouer tous les résultats (N)" visible dès qu'au moins un filtre est actif (statut et/ou type) et que le total est > 0 — rejoue l'intégralité des messages correspondants, indépendamment de la pagination
+- **Rejeu par filtre** : Bouton "Rejouer tous les résultats (N)" visible dès qu'au moins un filtre est actif (statut et/ou type de message) et que le total est > 0 — rejoue l'intégralité des messages correspondants, indépendamment de la pagination
 
 > Le rejeu par filtre est particulièrement utile lorsque le volume de messages en erreur dépasse la taille d'une page. Le backend applique les critères comme un `UPDATE ... WHERE`, sans nécessiter de connaître les IDs individuels.
 
@@ -77,8 +66,6 @@ Le rejeu consiste simplement à :
 2. Le scheduler applicatif existant retraite automatiquement ces messages
 
 **Pas de publication directe dans RabbitMQ** : on s'appuie sur les mécanismes existants.
-
-> Le compteur de rejeux est géré par le sidecar.
 
 #### Gestion des droits
 - **V1** : Aucune authentification — application accessible librement (réseau interne)
@@ -99,7 +86,7 @@ Le rejeu consiste simplement à :
 
 #### Évolution possible (phase 2)
 - Migration vers WebSocket/STOMP pour notifications temps réel
-- Publication des changements de statut via `/topic/inbox/{application}`
+- Publication des changements de statut via `/topic/inbox-outbox`
 - Mise à jour automatique du dashboard sans polling
 
 ---
@@ -112,7 +99,7 @@ Le rejeu consiste simplement à :
 - **Framework** : Spring Boot
 - **Langage** : Java
 - **API** : REST (exposition via OpenAPI)
-- **Accès données** : Spring data
+- **Accès données** : Spring Data / Hibernate (connexion JDBC directe)
 - **Pool de connexions** : HikariCP
 
 #### Frontend
@@ -125,107 +112,74 @@ Le rejeu consiste simplement à :
 - **Containerisation** : Docker
 - **Configuration** : ConfigMap / Secrets Kubernetes
 
-### 3.2 Gestion des Datasources
+### 3.2 Configuration de la Datasource
 
-#### Nombre de datasources
-- Environ 20 datasources (Oracle et PostgreSQL)
-- Configuration dynamique via fichier YAML ou ConfigMap
-
-#### Configuration
-Les noms de tables étant fixes (`EVT_T_DOMAIN_EVENT_INBOX` / `EVT_T_DOMAIN_EVENT_OUTBOX`), seules les informations de connexion sont nécessaires :
+SEMA se connecte à **une seule datasource** : la base de l'application du domaine dans lequel il est déployé.
 
 ```yaml
-demaf:
-  datasources:
-    - name: "App1"
-      jdbc-url: "jdbc:oracle:thin:@host:1521:sid"
-      username: "${APP1_DB_USER}"
-      password: "${APP1_DB_PASSWORD}"
-      role: "both"        # both | producer | consumer
-    - name: "App2"
-      jdbc-url: "jdbc:postgresql://host:5432/db"
-      username: "${APP2_DB_USER}"
-      password: "${APP2_DB_PASSWORD}"
-      role: "consumer"
+# ConfigMap SEMA (par déploiement domaine)
+sema:
+  datasource:
+    jdbc-url: "jdbc:oracle:thin:@host:1521:sid"
+    username: "${DB_USER}"
+    password: "${DB_PASSWORD}"
+    role: "both"   # both | producer | consumer
 ```
 
-Le champ `role` indique quelles tables sont présentes sur cette datasource :
+Le champ `role` indique quelles tables sont présentes :
 - `both` (défaut) : tables inbox **et** outbox présentes
 - `producer` : table outbox uniquement (pas d'inbox)
 - `consumer` : table inbox uniquement (pas d'outbox)
 
-#### Pool de connexions
-- **Taille minimale** : 1-2 connexions par datasource
-- **Justification** : Lectures ponctuelles, pas de charge continue
-- **Total** : 20-40 connexions max simultanées
-- **Timeouts** : Agressifs (3-5s par requête)
-
-#### Credentials
-- Stockage dans Secrets Kubernetes/OpenShift
-- Éventuellement HashiCorp Vault pour rotation automatique
-- Pas de credentials en clair dans le code ou configuration
+Credentials stockés dans Secrets Kubernetes/OpenShift.
 
 ### 3.3 Architecture API REST
 
 #### Endpoints principaux
 
-**Liste des applications disponibles**
-- `GET /api/applications`
-- Retourne la liste des applications configurées
-- Chaque entrée contient : `name`, `displayName`, `role` (`both` | `producer` | `consumer`), `connectionError` (booléen)
+**Résumé inbox/outbox**
+- `GET /api/summary`
+- Retourne les compteurs par statut pour inbox et/ou outbox selon le `role`
+- Appelé au montage de la page et à chaque auto-refresh
 
-**Vue d'ensemble**
-- `GET /api/inbox-outbox/summary`
-- Interroge toutes les datasources en parallèle
-- Retourne les compteurs par statut pour toutes les applications
-- Chaque entrée contient : `application`, `role`, `inbox` (objet compteurs ou `null` si role=producer), `outbox` (objet compteurs ou `null` si role=consumer), `connectionError` (booléen si datasource inaccessible)
-
-**Vue filtrée par application**
-- `GET /api/inbox-outbox/summary?application=XYZ`
-- Interroge uniquement la datasource de l'application XYZ
-- Temps de réponse rapide (<1s)
-- Même structure de réponse que la vue d'ensemble
+**Types de messages disponibles**
+- `GET /api/message-types`
 
 **Liste des messages**
-- `GET /api/inbox-outbox/applications/{appName}/messages?status={status}`
-- Paramètres optionnels : status, page, size
+- `GET /api/messages?direction={direction}&statuses={status}&types={type}&page={n}&pageSize={n}`
 - Retourne les métadonnées paginées
 
 **Détail d'un message**
-- `GET /api/inbox-outbox/applications/{appName}/messages/{messageId}`
-- Retourne toutes les métadonnées du message
+- `GET /api/messages/{messageId}`
 
 **Rejeu de messages**
-- `POST /api/inbox-outbox/applications/{appName}/messages/{messageId}/replay` (unitaire)
-- `POST /api/inbox-outbox/applications/{appName}/messages/replay` avec body `{ ids: [...] }` (par lot, sélection manuelle)
-- `POST /api/inbox-outbox/applications/{appName}/messages/replay-by-filter` avec body `{ status?, types?: [...] }` (par filtre — rejoue tous les messages correspondants côté serveur, sans limite de pagination)
+- `POST /api/messages/{messageId}/replay` (unitaire)
+- `POST /api/messages/replay` avec body `{ ids: [...] }` (par lot)
+- `POST /api/messages/replay-by-filter` avec body `{ direction?, statuses?, types? }` (par filtre)
 
 ### 3.4 Stratégie de Requêtage
 
-#### Vue d'ensemble (toutes les applications)
-- Exécution parallèle via CompletableFuture ou mécanismes reactifs
-- Timeout global : 15-20s
-- Timeout par datasource : 5s
-- Gestion gracieuse des erreurs : si une base ne répond pas, renvoyer "N/A" pour cette app
-
-#### Vue filtrée (une application)
-- Requête SQL simple : `SELECT status, COUNT(*) FROM inbox_table GROUP BY status`
-- Temps de réponse : <1s
+#### Vue d'ensemble
+- Requête SQL directe sur la datasource du domaine
+- Temps de réponse attendu : <1s
+- Timeout de requête : 5s
 
 #### Liste détaillée
 - Requête avec filtres et pagination
 - Index requis sur colonnes : status, timestamp
 
+#### Rejeu
+- UPDATE SQL exécuté directement sur la base du domaine
+- Réponse synchrone après exécution des UPDATE
+
 ### 3.5 Gestion des Erreurs
 
-#### Datasource inaccessible
-- Ne pas bloquer toute la requête
-- Retourner une erreur pour cette datasource spécifique
-- Afficher "Erreur" ou "N/A" dans le frontend
+#### Base de données inaccessible
+- Retourner une erreur HTTP 503 avec message explicite
+- Afficher un message d'erreur dans le frontend
 
 #### Timeout
-- Timeout par datasource configuré à 5s
-- Timeout global pour la requête complète : 15-20s
+- Timeout de requête configuré à 5s
 
 #### Erreurs de rejeu
 - Retourner un code HTTP approprié (4xx/5xx)
@@ -235,7 +189,7 @@ Le champ `role` indique quelles tables sont présentes sur cette datasource :
 
 ## 4. Cas d'Usage Détaillés
 
-### CU1 : Consulter l'état global des inbox/outbox
+### CU1 : Consulter l'état de l'application
 
 **Acteur** : Opérateur, Administrateur
 
@@ -243,46 +197,26 @@ Le champ `role` indique quelles tables sont présentes sur cette datasource :
 
 **Scénario nominal** :
 1. L'utilisateur accède à l'application
-2. Le système affiche automatiquement la vue d'ensemble
-3. Le système interroge les 20 datasources en parallèle (2-3s de chargement)
-4. Affichage d'un tableau avec pour chaque application :
-   - Nombre de messages A_TRAITER
-   - Nombre de messages EN_TRAITEMENT
-   - Nombre de messages TRAITE
-   - Nombre de messages EN_ERREUR
-5. Le tableau se rafraîchit automatiquement toutes les 10s
+2. Le système affiche les cards de résumé inbox/outbox avec les compteurs par statut
+3. La liste des messages est repliée par défaut
+4. Les compteurs se rafraîchissent automatiquement toutes les 10s
 
 **Scénario alternatif** :
-- Une ou plusieurs datasources sont inaccessibles → afficher "Erreur" pour ces applications
+- La base de données est inaccessible → afficher un message d'erreur explicite
 
-### CU2 : Consulter une application spécifique
+### CU2 : Consulter les messages en erreur
 
 **Acteur** : Opérateur, Administrateur
 
-**Préconditions** : Aucune (pas d'authentification en V1), vue d'ensemble affichée
+**Préconditions** : Liste des messages affichée
 
 **Scénario nominal** :
-1. L'utilisateur sélectionne "App XYZ" dans le dropdown
-2. Le système interroge uniquement la datasource XYZ (<1s)
-3. Affichage des compteurs détaillés pour cette application
-4. Le rafraîchissement auto continue sur cette application uniquement
-
-### CU3 : Consulter les messages en erreur
-
-**Acteur** : Opérateur, Administrateur
-
-**Préconditions** : Vue d'ensemble affichée
-
-**Scénario nominal (clic sur une ligne)** :
-1. L'utilisateur clique n'importe où sur la ligne d'une application
-2. Le système navigue vers la liste des messages de cette application avec le filtre `EN_ERREUR` pré-sélectionné
+1. L'utilisateur sélectionne le filtre statut `EN_ERREUR`
+2. La liste se met à jour et n'affiche que les messages en erreur
 3. Pour chaque message : identifiant, user, timestamp, type, statut, nb rejeux
-4. L'utilisateur peut modifier les filtres, paginer, trier
+4. L'utilisateur peut affiner les filtres, paginer
 
-**Scénario alternatif (clic sur le compteur EN_ERREUR)** :
-- Comportement identique au clic sur la ligne — le compteur est un raccourci visuel vers le même résultat
-
-### CU4 : Consulter le détail d'un message
+### CU3 : Consulter le détail d'un message
 
 **Acteur** : Opérateur, Administrateur
 
@@ -294,7 +228,7 @@ Le champ `role` indique quelles tables sont présentes sur cette datasource :
 3. Affichage de toutes les métadonnées du message
 4. **V1** : Pas de message d'erreur détaillé (colonne absente en base)
 
-### CU5 : Rejouer un message en erreur
+### CU4 : Rejouer un message en erreur
 
 **Acteur** : Administrateur
 
@@ -311,7 +245,7 @@ Le champ `role` indique quelles tables sont présentes sur cette datasource :
 **Scénario alternatif** :
 - Le message a déjà été rejoué entre-temps → erreur de concurrence
 
-### CU6 : Rejouer plusieurs messages en lot (sélection manuelle)
+### CU5 : Rejouer plusieurs messages en lot (sélection manuelle)
 
 **Acteur** : Administrateur
 
@@ -325,9 +259,9 @@ Le champ `role` indique quelles tables sont présentes sur cette datasource :
 5. Retour immédiat (200 OK)
 6. Le tableau se rafraîchit
 
-**Limite** : La sélection est restreinte aux messages de la page affichée. Pour rejouer un volume supérieur à la taille de page, utiliser CU7.
+**Limite** : La sélection est restreinte aux messages de la page affichée. Pour rejouer un volume supérieur à la taille de page, utiliser CU6.
 
-### CU7 : Rejouer tous les messages correspondant aux filtres actifs
+### CU6 : Rejouer tous les messages correspondant aux filtres actifs
 
 **Acteur** : Administrateur
 
@@ -340,88 +274,36 @@ Le champ `role` indique quelles tables sont présentes sur cette datasource :
 4. L'utilisateur clique sur ce bouton
 5. Un dialog de confirmation récapitule les filtres appliqués et le volume concerné, et avertit que l'action dépasse la page affichée
 6. L'utilisateur confirme
-7. Le système appelle `POST .../messages/replay-by-filter` avec `{ status, types }` — le backend applique les filtres et effectue les UPDATE sans limite de pagination
+7. Le système appelle `POST .../messages/replay-by-filter` avec `{ direction?, statuses, types }` — le backend applique les filtres et effectue les UPDATE sans limite de pagination
 8. Le tableau se rafraîchit depuis la page 1
 
 **Scénario alternatif** :
 - Le volume est très élevé (milliers de messages) → le backend traite en une seule transaction ou en batch interne, le frontend attend le retour 200 OK
 
-### CU8 : Consulter la vue globale par type de message
-
-**Acteur** : Opérateur, Administrateur
-
-**Préconditions** : Aucune (pas d'authentification en V1)
-
-**Scénario nominal** :
-1. L'utilisateur accède au dashboard et clique sur l'onglet "Par type de message"
-2. Le système agrège les données de toutes les datasources par type de message
-3. Affichage d'un tableau : une ligne par type de message, colonnes agrégées (A_TRAITER, EN_TRAITEMENT, TRAITE, EN_ERREUR) toutes applications confondues
-4. L'utilisateur identifie qu'`ORDER_CREATED` totalise 31 messages `EN_ERREUR` dans le SI
-
-**Scénario alternatif** :
-- Une ou plusieurs datasources sont inaccessibles → les compteurs de cette datasource sont exclus de l'agrégat ; un indicateur signale les données partielles
-
-### CU9 : Consulter le flux d'un type de message
-
-**Acteur** : Opérateur, Administrateur
-
-**Préconditions** : Onglet "Par type de message" affiché (CU8)
-
-**Scénario nominal** :
-1. L'utilisateur clique sur la ligne `ORDER_CREATED`
-2. Navigation vers la page `/message-types/ORDER_CREATED`
-3. Le système affiche le flux complet :
-   - Section **Producteurs (OUTBOX)** : App-Commandes avec ses compteurs (51 traités, 3 erreurs…)
-   - Section **Consommateurs (INBOX)** : App-Facturation (23 erreurs), App-Stock (2 erreurs), App-CRM (47 à traiter)
-4. L'utilisateur identifie que App-Facturation est le maillon dégradé
-5. Il clique sur la ligne App-Facturation → navigation vers la liste des messages filtrée (`app=App-Facturation`, `type=ORDER_CREATED`)
-
-**Scénario alternatif** :
-- Le type de message n'existe que dans une direction (ex. uniquement en OUTBOX) → la section correspondante est absente ou affichée vide avec un libellé explicite
-
 ---
 
 ## 5. Problématiques et Solutions
 
-### 5.1 Performance
+### 5.1 Sécurité
 
-**Problématique** : Interroger 20 bases peut être long
-
-**Solutions** :
-- Parallélisation systématique des requêtes
-- Timeouts agressifs par datasource
-- Mode filtré pour interroger 1 seule base quand suffisant
-- Requêtes SQL optimisées (COUNT avec index)
-
-### 5.2 Fiabilité
-
-**Problématique** : Une base inaccessible ne doit pas bloquer tout le système
-
-**Solutions** :
-- Gestion d'erreur granulaire par datasource
-- Affichage partiel des résultats disponibles
-- Healthchecks désactivés au démarrage (lazy loading)
-
-### 5.3 Sécurité
-
-**Problématique** : 20 couples user/password à gérer
+**Problématique** : Accès à la base de données sans exposer les credentials
 
 **Solutions** :
 - Secrets Kubernetes/OpenShift
-- Éventuellement HashiCorp Vault
+- Éventuellement HashiCorp Vault pour rotation automatique
 - Pas de credentials dans le code ou logs
 
-### 5.4 Expérience Utilisateur
+### 5.2 Expérience Utilisateur
 
-**Problématique** : Attente lors du chargement des 20 datasources
+**Problématique** : Fluidité de navigation lors du rejeu de messages
 
 **Solutions** :
-- Loader avec indicateur de progression
-- Mode filtré pour accès rapide à une app
+- Mise à jour optimiste de l'interface après rejeu unitaire
+- Loader visible lors des appels (rejeu par filtre sur gros volumes)
 - Rafraîchissement auto intelligent (pause possible)
 - Évolution possible : WebSocket pour temps réel
 
-### 5.5 Concurrence sur les rejeux
+### 5.3 Concurrence sur les rejeux
 
 **Problématique** : Deux utilisateurs rejouent le même message
 
@@ -464,10 +346,9 @@ Le champ `role` indique quelles tables sont présentes sur cette datasource :
 
 | Risque | Probabilité | Impact | Mitigation |
 |--------|-------------|--------|------------|
-| Datasource inaccessible bloque tout | Moyenne | Élevé | Timeouts + gestion d'erreur granulaire |
-| Temps de réponse > 30s | Faible | Moyen | Parallélisation + timeouts agressifs |
-| Épuisement pools de connexions | Faible | Moyen | Pools minimaux (1-2 connexions) |
-| Tables inbox/outbox non indexées | Moyenne | Élevé | Vérifier indexes avant déploiement |
+| Base de données inaccessible | Faible | Élevé | Message d'erreur explicite, retry possible |
+| Tables inbox/outbox non indexées | Moyenne | Élevé | Vérifier index avant déploiement |
+| Timeout sur gros volumes de rejeu | Faible | Moyen | UPDATE batch interne, timeout configurable |
 
 ### 7.2 Risques Fonctionnels
 
@@ -479,30 +360,27 @@ Le champ `role` indique quelles tables sont présentes sur cette datasource :
 
 ### 7.3 Dépendances
 
-- Accès en lecture sur les 20 bases de données (credentials à obtenir)
-- Structure des tables inbox/outbox validée et homogène sur toutes les bases
-- Coordination avec les équipes propriétaires des schedulers
+- Accès en lecture/écriture à la base de données du domaine (credentials à obtenir)
+- Structure des tables inbox/outbox validée (homogène avec le reste du SI)
+- Coordination avec l'équipe propriétaire du scheduler applicatif
 - Infrastructure OpenShift prête (namespace, ressources)
 
 ---
 
 ## 8. Plan de Déploiement et Phases
 
-### Phase 1 : MVP (2-3 sprints)
-- Consultation vue d'ensemble par application (20 datasources)
-- Consultation filtrée par application
-- Liste des messages avec métadonnées
+### Phase 1 : MVP (1-2 sprints)
+- Cards résumé inbox/outbox (page d'accueil)
+- Liste des messages dépliable avec filtres direction, statut, type de message
 - Détail d'un message
-- Rejeu unitaire
+- Rejeu unitaire (CU4)
 - Rafraîchissement automatique (polling)
 
-### Phase 2 : Administration + Vue par type (2-3 sprints)
-- Rejeu par lot (sélection multiple, CU6)
-- Rejeu par filtre — tous les messages correspondants en une action (CU7)
-- Vue globale par type de message — tableau de synthèse agrégée (CU8)
-- Vue de flux par type de message — page de détail avec producteurs / consommateurs (CU9)
+### Phase 2 : Administration complète (2 sprints)
+- Rejeu par lot — sélection multiple (CU5)
+- Rejeu par filtre — tous les messages correspondants en une action (CU6)
 - Gestion des droits (visualisation vs administration)
-- Traçabilité des rejeux
+- Traçabilité des rejeux (compteur en base)
 
 ### Phase 3 : Optimisations (1 sprint)
 - Migration vers WebSocket pour temps réel
@@ -510,7 +388,7 @@ Le champ `role` indique quelles tables sont présentes sur cette datasource :
 - Métriques et monitoring de l'application elle-même
 
 ### Phase 4 : Évolutions (optionnel)
-- Rejeu depuis la vue par type de message (ex. rejouer tous les ORDER_CREATED EN_ERREUR toutes apps)
+- Vue cross-domaines (agrégation de plusieurs instances SEMA — architecture à définir)
 - Affichage du payload sur demande
 - Export CSV des messages
 - Statistiques et graphiques (évolution dans le temps)
@@ -520,10 +398,10 @@ Le champ `role` indique quelles tables sont présentes sur cette datasource :
 
 ## 9. Indicateurs de Succès
 
-- Temps de réponse vue d'ensemble < 5s dans 95% des cas
-- Temps de réponse vue filtrée < 1s dans 99% des cas
-- Disponibilité > 99% (hors indisponibilité des datasources sources)
-- Aucun impact sur les performances des applications métier
+- Temps de réponse vue d'ensemble < 1s dans 99% des cas
+- Temps de réponse liste des messages < 2s dans 95% des cas
+- Disponibilité > 99% (hors indisponibilité de la base source)
+- Aucun impact sur les performances de l'application métier
 - Adoption par les équipes d'exploitation (> 5 utilisateurs réguliers)
 - Réduction du temps de diagnostic des erreurs de 50%
 

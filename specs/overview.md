@@ -11,10 +11,10 @@ Chaque application utilise le pattern inbox/outbox pour garantir la fiabilité d
 - **Inbox** : Messages entrants à traiter
 - **Outbox** : Messages sortants à envoyer
 
-Ces tables techniques sont réparties sur environ 20 bases de données (Oracle et PostgreSQL).
+SEMA est déployé **au sein de chaque domaine applicatif**, au plus près de la base de données de l'application. Chaque instance accède directement à **une seule datasource** : la base de l'application du domaine.
 
 ### Objectifs
-Développer une application d'exploitation permettant de **visualiser à la demande** l'état des messages dans les tables inbox/outbox, notamment :
+Développer un outil d'exploitation du domaine permettant de **visualiser à la demande** l'état des messages dans les tables inbox/outbox de l'application, notamment :
 - Nombre de messages par statut (A_TRAITER, EN_TRAITEMENT, TRAITE, EN_ERREUR, etc.)
 - Consultation détaillée des messages en erreur
 - Rejeu manuel des messages (unitaire ou par lot)

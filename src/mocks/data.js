@@ -1,5 +1,5 @@
 // ─── Configuration du domaine ─────────────────────────────────────────────────
-// En mock, on simule une instance DEMAF déployée sur le domaine "Facturation".
+// En mock, on simule une instance SEMA déployée sur le domaine "Facturation".
 // role 'both' : tables inbox ET outbox présentes
 export const DOMAIN_ROLE = 'both'
 

@@ -1,12 +1,13 @@
 {
-  "name": "demaf-frontend",
+  "name": "sema-frontend",
   "version": "0.0.1",
   "private": true,
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "test:unit:ci": "echo 'Penser à faire des tests'"
   },
   "dependencies": {
     "msw": "^2.7.0",

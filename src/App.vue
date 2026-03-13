@@ -1,14 +1,14 @@
 <template>
   <v-app>
-    <v-app-bar color="primary" elevation="0">
+    <v-app-bar color="navbar" elevation="0">
       <template #prepend>
-        <img src="/logo.svg" height="34" width="34" alt="DEMAF" class="ml-2 mr-1" style="border-radius:6px"/>
+        <img src="/logo.svg" height="48" alt="République et canton de Genève" class="ml-2 mr-1"/>
       </template>
       <v-app-bar-title>
         <router-link to="/" class="text-white text-decoration-none font-weight-bold">
-          DEMAF
+          SEMA
         </router-link>
-        <span class="text-caption ml-2 opacity-70">Domain Event Message Async Flow</span>
+        <span class="text-caption ml-2 opacity-70">Suivi et Exploitation des Messages Applicatifs</span>
       </v-app-bar-title>
       <template v-if="isMock" #append>
         <v-chip size="small" color="warning" variant="tonal" class="mr-4">

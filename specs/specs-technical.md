@@ -4,17 +4,11 @@
 
 ### 1 Stack Technique
 
-#### Backend DEMAF
+#### Backend SEMA
 - **Framework** : Spring Boot
 - **Langage** : Java
 - **API** : REST (exposition via OpenAPI)
-- **Client HTTP** : Spring WebClient (appels vers les composants techniques)
-
-#### Composant technique (sidecar)
-- Un composant par application métier, déployé en sidecar
-- Accès direct à la base de données de l'application (JDBC)
-- Expose une API REST normalisée (contrat défini dans la section 3)
-- **Accès données** : Spring Data / Hibernate
+- **Accès données** : Spring Data / Hibernate (connexion JDBC directe à la base du domaine)
 - **Pool de connexions** : HikariCP
 
 #### Frontend
@@ -31,7 +25,7 @@
 
 ### 2 Schéma des Tables
 
-Les tables inbox et outbox ont une structure homogène sur l'ensemble des ~20 bases (Oracle et PostgreSQL). Les noms de tables sont fixes et identiques partout. Ce schéma est la responsabilité des composants techniques (sidecars) — le backend DEMAF n'a pas d'accès direct aux bases.
+Les tables inbox et outbox ont une structure fixe. SEMA y accède directement via JDBC. Les noms de tables sont fixes et identiques sur toutes les bases du SI.
 
 #### Table Outbox
 
@@ -97,21 +91,20 @@ CREATE TABLE EVT_T_DOMAIN_EVENT_INBOX
 
 ---
 
-### 3 Contrat API des composants techniques (sidecar)
+### 3 Configuration de la Datasource
 
-Chaque composant technique expose une API REST normalisée. Le backend DEMAF est le seul consommateur de ces APIs — le frontend ne les appelle jamais directement.
+SEMA se connecte à **une seule datasource** : la base de l'application du domaine dans lequel il est déployé. La configuration est injectée via ConfigMap et Secrets Kubernetes.
 
-#### Configuration côté sidecar
+#### Configuration
 
 ```yaml
-# application.yml du sidecar
-demaf:
-  sidecar:
-    role: "both"   # both | producer | consumer
+# ConfigMap SEMA (par déploiement domaine)
+sema:
   datasource:
     jdbc-url: "jdbc:oracle:thin:@host:1521:sid"
     username: "${DB_USER}"
     password: "${DB_PASSWORD}"
+    role: "both"   # both | producer | consumer
 ```
 
 Le champ `role` indique quelles tables sont présentes :
@@ -119,11 +112,29 @@ Le champ `role` indique quelles tables sont présentes :
 - `producer` : table outbox uniquement
 - `consumer` : table inbox uniquement
 
-#### Endpoints exposés par le sidecar
+#### Pool de connexions (HikariCP)
+- Taille du pool : 2-5 connexions (lectures ponctuelles, pas de charge continue)
+- Timeout de connexion : 5s
+- Credentials stockés dans Secrets Kubernetes/OpenShift
 
-**Synthèse des compteurs**
-- `GET /inbox-outbox/summary`
-- Retourne les compteurs par statut pour inbox et/ou outbox selon le `role`
+---
+
+### 4 Authentification
+
+- **V0** : Aucune authentification — application accessible sur réseau interne
+- Authentification SEMA (SSO/OIDC/Keycloak) : reportée en phase ultérieure
+
+---
+
+### 5 Architecture API REST (SEMA → Frontend)
+
+Le backend SEMA accède directement à la datasource du domaine et expose une API REST au frontend.
+
+#### Endpoints principaux
+
+**Résumé inbox/outbox**
+- `GET /api/summary`
+- Retourne les compteurs par statut pour inbox et/ou outbox selon le `role` configuré
 - Réponse :
   ```json
   {
@@ -135,166 +146,59 @@ Le champ `role` indique quelles tables sont présentes :
 - `inbox` est `null` si `role=producer`, `outbox` est `null` si `role=consumer`
 
 **Types de messages disponibles**
-- `GET /inbox-outbox/message-types`
-- Retourne les types de messages distincts présents dans les tables, avec leur direction
-- Réponse :
-  ```json
-  {
-    "role": "both",
-    "types": ["ORDER_CREATED", "INVOICE_SENT", "STOCK_UPDATED"]
-  }
-  ```
+- `GET /api/message-types`
+- Retourne les types de messages distincts présents dans les tables, avec le rôle configuré
 
 **Liste des messages**
-- `GET /inbox-outbox/messages`
+- `GET /api/messages`
 - Paramètres : `direction` (`inbox`|`outbox`), `statuses` (multi-valeur), `types` (multi-valeur), `page`, `pageSize`
-- Retourne les métadonnées paginées (pas le payload) :
-  ```json
-  {
-    "total": 345,
-    "page": 1,
-    "pageSize": 50,
-    "items": [
-      {
-        "id": "uuid",
-        "direction": "inbox",
-        "type": "ORDER_CREATED",
-        "user": "jdupont",
-        "timestamp": "2025-03-01T10:23:00Z",
-        "status": "EN_ERREUR",
-        "replayCount": 0
-      }
-    ]
-  }
-  ```
+- Retourne les métadonnées paginées (pas le payload)
 
 **Détail d'un message**
-- `GET /inbox-outbox/messages/{id}`
+- `GET /api/messages/{messageId}`
 - Retourne toutes les métadonnées (pas le payload)
 
 **Rejeu unitaire**
-- `POST /inbox-outbox/messages/{id}/replay`
+- `POST /api/messages/{messageId}/replay`
 - Effectue `UPDATE ... SET status = 'A_TRAITER' WHERE id = ?`
 
 **Rejeu par lot**
-- `POST /inbox-outbox/messages/replay`
+- `POST /api/messages/replay`
 - Body : `{ "ids": ["uuid1", "uuid2"] }`
 
 **Rejeu par filtre**
-- `POST /inbox-outbox/messages/replay-by-filter`
+- `POST /api/messages/replay-by-filter`
 - Body : `{ "direction": "inbox", "statuses": ["EN_ERREUR"], "types": ["ORDER_CREATED"] }`
-- Effectue un `UPDATE ... WHERE` côté sidecar sans limite de pagination
+- Effectue un `UPDATE ... WHERE` sans limite de pagination
 
 ---
 
-### 4 Gestion des composants techniques (V0 — liste statique)
+### 6 Stratégie de Requêtage
 
-#### Configuration DEMAF
+#### Résumé
+- Requête SQL directe : `SELECT status, COUNT(*) FROM inbox_table GROUP BY status`
+- Appelée au montage de page et à chaque auto-refresh
+- Timeout de requête : 5s
 
-Le backend DEMAF dispose d'une liste statique des composants techniques, injectée via ConfigMap :
-
-```yaml
-demaf:
-  components:
-    - name: "App1"
-      url: "http://app1-sidecar/inbox-outbox"
-      role: "both"
-    - name: "App2"
-      url: "http://app2-sidecar/inbox-outbox"
-      role: "consumer"
-```
-
-Aucun credential n'est nécessaire côté DEMAF — la sécurité repose sur les politiques réseau OpenShift (les sidecars ne sont accessibles que depuis le namespace DEMAF).
-
-#### Évolution — Enregistrement dynamique (V1)
-
-> **Réservé pour une phase ultérieure.**
->
-> En V1, les sidecars s'enregistreront dynamiquement auprès du backend DEMAF au démarrage via un endpoint dédié (`POST /api/registry/register`), avec un mécanisme de heartbeat périodique et TTL. Cela permettra d'ajouter ou retirer des applications sans redéployer DEMAF. La liste statique sera conservée comme fallback de bootstrap.
-
----
-
-### 5 Authentification
-
-- **V0** : Aucune authentification — application accessible sur réseau interne, sidecars isolés par politique réseau
-- Authentification DEMAF (SSO/OIDC/Keycloak) et sécurisation des appels sidecar : reportées en phase ultérieure
-
----
-
-### 6 Architecture API REST (DEMAF → Frontend)
-
-Le backend DEMAF agrège les appels aux sidecars et expose une API unifiée au frontend.
-
-#### Endpoints principaux
-
-**Liste des applications disponibles**
-- `GET /api/applications`
-- Retourne la liste des composants configurés
-- Chaque entrée : `name`, `role` (`both` | `producer` | `consumer`), `connectionError` (booléen)
-
-**Vue d'ensemble**
-- `GET /api/inbox-outbox/summary`
-- Interroge tous les sidecars en parallèle
-- Chaque entrée : `application`, `role`, `inbox` (compteurs ou `null`), `outbox` (compteurs ou `null`), `connectionError`
-
-**Vue filtrée par application**
-- `GET /api/inbox-outbox/summary?application=XYZ`
-- Interroge uniquement le sidecar de l'application XYZ
-- Temps de réponse rapide (<1s)
-
-**Liste des messages**
-- `GET /api/inbox-outbox/applications/{appName}/messages`
-- Paramètres : `direction`, `statuses`, `types`, `page`, `pageSize`
-- Proxie vers `GET /inbox-outbox/messages` du sidecar correspondant
-
-**Détail d'un message**
-- `GET /api/inbox-outbox/applications/{appName}/messages/{messageId}`
-
-**Rejeu de messages**
-- `POST /api/inbox-outbox/applications/{appName}/messages/{messageId}/replay`
-- `POST /api/inbox-outbox/applications/{appName}/messages/replay` — body `{ ids: [...] }`
-- `POST /api/inbox-outbox/applications/{appName}/messages/replay-by-filter` — body `{ direction?, statuses?, types? }`
-
-**Vue par type de message — synthèse agrégée**
-- `GET /api/inbox-outbox/message-types/summary`
-- Agrège les compteurs de tous les sidecars par type de message
-- Indicateur `partialData: true` si certains sidecars sont inaccessibles
-
-**Vue par type de message — détail du flux**
-- `GET /api/inbox-outbox/message-types/{type}/summary`
-- Retourne producteurs (outbox) et consommateurs (inbox) pour ce type, avec leurs compteurs
-
----
-
-### 7 Stratégie d'appels aux sidecars
-
-#### Vue d'ensemble (tous les sidecars)
-- Exécution parallèle via `CompletableFuture` / WebClient réactif
-- Timeout par sidecar : 5s
-- Timeout global : 15-20s
-- Si un sidecar ne répond pas : `connectionError: true` pour cette application, les autres résultats sont retournés normalement
-
-#### Vue filtrée (un sidecar)
-- Appel direct au sidecar concerné
-- Temps de réponse attendu : <1s
+#### Liste détaillée
+- Requête avec filtres et pagination
+- Index requis sur colonnes : status, timestamp
 
 #### Rejeu
-- Appel POST transmis au sidecar concerné
-- Réponse synchrone : le sidecar effectue l'UPDATE et retourne 200 OK
+- UPDATE SQL exécuté directement sur la base du domaine
+- Réponse synchrone : retourne 200 OK une fois les UPDATE effectués
 
 ---
 
-### 8 Gestion des Erreurs
+### 7 Gestion des Erreurs
 
-#### Sidecar inaccessible
-- Ne pas bloquer la requête globale
-- Retourner `connectionError: true` pour l'application concernée
-- Afficher "N/A" dans le frontend
+#### Base de données inaccessible
+- Retourner une erreur HTTP 503 avec message explicite
+- Afficher un message d'erreur dans le frontend
 
 #### Timeout
-- Timeout par sidecar : 5s
-- Timeout global : 15-20s
+- Timeout de requête configuré à 5s
 
 #### Erreurs de rejeu
-- Code HTTP approprié (4xx/5xx) retourné par le sidecar, propagé par DEMAF
+- Code HTTP approprié (4xx/5xx)
 - Message d'erreur explicite côté frontend

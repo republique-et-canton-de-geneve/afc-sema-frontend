@@ -1,8 +1,8 @@
-# DEMAF — Domain Event Messages Async Flow
+# SEMA — Suivi et Exploitation des Messages Applicatifs
 
-DEMAF est un outil interne permettant aux équipes d'exploitation de surveiller et d'administrer les files de messages asynchrones (pattern inbox/outbox) réparties sur l'ensemble du SI.
+SEMA est un outil interne permettant aux équipes d'exploitation de surveiller et d'administrer les files de messages asynchrones (pattern inbox/outbox) réparties sur l'ensemble du SI.
 
-Il offre une vue consolidée de l'état des messages dans toutes les applications, et permet de relancer manuellement les messages en erreur sans intervention directe en base.
+Il offre une vue de l'état des messages reçus et envoyés dans un domaine applicatif (une base de données), et permet de relancer manuellement les messages en erreur sans intervention directe en base. 
 
 ## Fonctionnalités
 
@@ -15,11 +15,8 @@ Il offre une vue consolidée de l'état des messages dans toutes les application
 
 ```
 frontend/       Vue.js 3 + Vuetify
-backend/        Spring Boot (Java) — agrège les données des sidecars
-sidecar/        Composant déployé au plus près de chaque application métier
+backend/        Java Spring — Récupère les données d'une base de données
 ```
-
-Le backend orchestre les appels vers les sidecars (un par application), qui sont les seuls à accéder directement aux bases de données. Le frontend ne communique qu'avec le backend.
 
 ## Prérequis
 
@@ -30,27 +27,18 @@ Le backend orchestre les appels vers les sidecars (un par application), qui sont
 ### Backend
 - Java 21+
 - Maven ou Gradle
-- Accès réseau aux sidecars
+ Accès JDBC à la base de données de l'application cible (Oracle ou PostgreSQL)
 
-### Sidecar
-- Java 21+
-- Accès JDBC à la base de données de l'application cible (Oracle ou PostgreSQL)
 
 ### Déploiement
 - OpenShift / Kubernetes
-- ConfigMap listant les URLs des sidecars
 
 ## Lancement en développement
 
 ```bash
 # Frontend
-cd frontend
 npm install
 npm run dev
-
-# Backend
-cd backend
-./mvnw spring-boot:run
 ```
 
 ## Documentation

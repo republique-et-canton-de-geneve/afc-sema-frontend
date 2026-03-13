@@ -17,5 +17,9 @@ export default defineConfig(({ mode }) => {
                 },
             },
         },
+        build: {
+            outDir: "target/dist",
+            assetsInlineLimit: 0,
+        },
     };
 });
