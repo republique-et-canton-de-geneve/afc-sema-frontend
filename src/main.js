@@ -29,8 +29,8 @@ async function bootstrap() {
                 light: {
                     colors: {
                         primary: "#1565C0",
-                        navbar: "#1A3A5C",
-                        background: "#6DA6CB",
+                        navbar: "#6DA6CB",
+                        background: "#F0F2F5",
                         surface: "#FFFFFF",
                     },
                 },
