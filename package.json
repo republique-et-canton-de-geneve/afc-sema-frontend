@@ -7,18 +7,23 @@
         "dev": "vite",
         "build": "vite build",
         "preview": "vite preview",
-        "test:unit:ci": "echo 'Penser à faire des tests'"
+        "test": "vitest run",
+        "test:watch": "vitest",
+        "test:unit:ci": "vitest run --reporter=verbose"
     },
     "dependencies": {
+        "@mdi/font": "^7.4.47",
         "msw": "^2.7.0",
         "vue": "^3.5.13",
         "vue-router": "^4.5.0",
-        "vuetify": "^3.7.6",
-        "@mdi/font": "^7.4.47"
+        "vuetify": "^3.7.6"
     },
     "devDependencies": {
         "@vitejs/plugin-vue": "^5.2.1",
-        "vite": "^6.1.0"
+        "@vue/test-utils": "^2.4.6",
+        "jsdom": "^29.0.1",
+        "vite": "^6.1.0",
+        "vitest": "^4.1.0"
     },
     "msw": {
         "workerDirectory": [
