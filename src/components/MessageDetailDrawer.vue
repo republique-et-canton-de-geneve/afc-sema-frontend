@@ -102,10 +102,10 @@ const metaRows = computed(() => {
     { label: 'Direction',   value: m.direction },
     { label: 'Type',        value: m.type },
     { label: 'Utilisateur', value: m.utilisateur },
-    { label: 'Horodatage',  value: new Date(m.timestamp).toLocaleString('fr-FR') },
+    { label: 'Horodatage',  value: new Date(m.timestamp).toLocaleString('fr-CH', { timeZone: 'Europe/Zurich' }) },
     { label: 'Nb rejeux',   value: m.nbRejeux },
     ...(m.nbTentativesEnvoi != null ? [{ label: 'Tentatives envoi', value: m.nbTentativesEnvoi }] : []),
-    ...(m.datePublication   ? [{ label: 'Date publication',  value: new Date(m.datePublication).toLocaleString('fr-FR') }] : []),
+    ...(m.datePublication   ? [{ label: 'Date publication',  value: new Date(m.datePublication).toLocaleString('fr-CH', { timeZone: 'Europe/Zurich' }) }] : []),
   ]
 })
 

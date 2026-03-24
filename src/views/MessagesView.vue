@@ -257,7 +257,7 @@
                   <StatusChip :status="item.statut"/>
                 </template>
                 <template #item.timestamp="{ item }">
-                  {{ new Date(item.timestamp).toLocaleString('fr-FR') }}
+                  {{ new Date(item.timestamp).toLocaleString('fr-CH', { timeZone: 'Europe/Zurich' }) }}
                 </template>
                 <template #item.nbRejeux="{ item }">
                   <v-chip size="x-small" :color="item.nbRejeux > 0 ? 'warning' : 'default'" label>
