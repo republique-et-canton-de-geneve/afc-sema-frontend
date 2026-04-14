@@ -32,14 +32,17 @@ export const handlers = [
   // ── GET /api/messages ─────────────────────────────────────────────────────
   http.get(`${BASE}/messages`, async ({ request }) => {
     await delay()
-    const url       = new URL(request.url)
-    const statuses  = url.searchParams.getAll('statuses')
-    const direction = url.searchParams.get('direction')
-    const types     = url.searchParams.getAll('types')
-    const page      = parseInt(url.searchParams.get('page')     ?? '1',  10)
-    const pageSize  = parseInt(url.searchParams.get('pageSize') ?? '50', 10)
+    const url         = new URL(request.url)
+    const statuses    = url.searchParams.getAll('statuses')
+    const direction   = url.searchParams.get('direction')
+    const types       = url.searchParams.getAll('types')
+    const utilisateur = url.searchParams.get('utilisateur') ?? null
+    const page        = parseInt(url.searchParams.get('page')     ?? '1',  10)
+    const pageSize    = parseInt(url.searchParams.get('pageSize') ?? '50', 10)
+    const sortKey     = url.searchParams.get('sortKey')   ?? null
+    const sortOrder   = url.searchParams.get('sortOrder') ?? null
 
-    return HttpResponse.json(getMessages({ statuses, direction, types, page, pageSize }))
+    return HttpResponse.json(getMessages({ statuses, direction, types, utilisateur, page, pageSize, sortKey, sortOrder }))
   }),
 
   // ── GET /api/messages/:id ─────────────────────────────────────────────────

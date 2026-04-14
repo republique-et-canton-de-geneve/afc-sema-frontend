@@ -38,13 +38,16 @@ export function fetchMessageTypes() {
 }
 
 // ── Messages ──────────────────────────────────────────────────────────────────
-export function fetchMessages({ statuses = [], direction, types = [], page = 0, pageSize = 50 } = {}) {
+export function fetchMessages({ statuses = [], direction, types = [], utilisateur, page = 0, pageSize = 50, sortKey, sortOrder } = {}) {
   const params = new URLSearchParams()
   for (const s of (statuses ?? [])) params.append('statuses', s)
   if (direction)                     params.set('direction', direction)
   for (const t of (types ?? []))     params.append('types', t)
+  if (utilisateur)                   params.set('utilisateur', utilisateur)
   params.set('page', String(page))
   params.set('pageSize', String(pageSize))
+  if (sortKey)                       params.set('sortKey', sortKey)
+  if (sortOrder)                     params.set('sortOrder', sortOrder)
   return fetchJSON(`${BASE}/messages?${params}`)
 }
 

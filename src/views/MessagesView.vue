@@ -81,6 +81,18 @@
           </template>
         </v-select>
 
+        <!-- Utilisateur -->
+        <div class="text-caption font-weight-medium text-medium-emphasis mb-2">Utilisateur</div>
+        <v-text-field
+          v-model="filterUtilisateur"
+          placeholder="Tous"
+          density="compact"
+          hide-details
+          clearable
+          class="mb-5"
+          @update:model-value="onUtilisateurChange"
+        />
+
         <!-- Réinitialiser -->
         <v-btn
           v-if="hasActiveFilter"
@@ -240,7 +252,7 @@
 
             <!-- Table -->
             <v-card border>
-              <v-data-table
+              <v-data-table-server
                 v-model="selected"
                 :headers="headers"
                 :items="messages"
@@ -250,7 +262,8 @@
                 density="comfortable"
                 :items-per-page="pageSize"
                 :items-length="total"
-                @update:page="p => { page.value = p - 1; load() }"
+                :sort-by="currentSortBy"
+                @update:options="onTableOptions"
                 @click:row="(_, { item }) => openDrawer(item)"
               >
                 <template #item.statut="{ item }">
@@ -264,7 +277,7 @@
                     {{ item.nbRejeux }}
                   </v-chip>
                 </template>
-              </v-data-table>
+              </v-data-table-server>
             </v-card>
 
           </v-expansion-panel-text>
@@ -382,8 +395,16 @@ const replayingBatch = ref(false)
 const filterDialog    = ref(false)
 const replayingFilter = ref(false)
 
+const filterUtilisateur = ref('')
+const currentSortBy     = ref([])
+const sortKey           = ref(null)
+const sortOrder         = ref(null)
+
 const hasActiveFilter = computed(() =>
-  selectedStatuses.value.length > 0 || (selectedTypes.value?.length ?? 0) > 0 || !!selectedDirection.value
+  selectedStatuses.value.length > 0 ||
+  (selectedTypes.value?.length ?? 0) > 0 ||
+  !!selectedDirection.value ||
+  !!filterUtilisateur.value
 )
 const showDirFilter = computed(() =>
   summary.value === null || (summary.value.inbox != null && summary.value.outbox != null)
@@ -392,12 +413,12 @@ const showDirFilter = computed(() =>
 // ── Colonnes ──────────────────────────────────────────────────────────────────
 const ALL_COLUMNS = [
   { title: 'ID',          key: 'id',          sortable: false },
-  { title: 'Utilisateur', key: 'utilisateur', sortable: false },
-  { title: 'Horodatage',  key: 'timestamp',   sortable: false },
-  { title: 'Type',        key: 'type',        sortable: false },
-  { title: 'Direction',   key: 'direction',   sortable: false },
-  { title: 'Statut',      key: 'statut',      sortable: false },
-  { title: 'Nb rejeux',   key: 'nbRejeux',    sortable: false, align: 'center' },
+  { title: 'Utilisateur', key: 'utilisateur', sortable: true  },
+  { title: 'Horodatage',  key: 'timestamp',   sortable: true  },
+  { title: 'Type',        key: 'type',        sortable: true  },
+  { title: 'Direction',   key: 'direction',   sortable: true  },
+  { title: 'Statut',      key: 'statut',      sortable: true  },
+  { title: 'Nb rejeux',   key: 'nbRejeux',    sortable: true,  align: 'center' },
 ]
 
 const LS_KEY = 'sema:visibleColumns'
@@ -445,6 +466,21 @@ watch(tableExpanded, async (val) => {
   }
 })
 
+// ── Tri et pagination via v-data-table-server ──────────────────────────────────
+function onTableOptions({ page: newPage, sortBy }) {
+  const p  = newPage - 1
+  const sk = sortBy?.[0]?.key   ?? null
+  const so = sortBy?.[0]?.order ?? null
+
+  const changed = p !== page.value || sk !== sortKey.value || so !== sortOrder.value
+  page.value          = p
+  sortKey.value       = sk
+  sortOrder.value     = so
+  currentSortBy.value = sortBy ?? []
+
+  if (tableLoaded.value && tableExpanded.value === 'messages' && changed) load()
+}
+
 // ── Sélection de direction ────────────────────────────────────────────────────
 async function setDirection(value) {
   selectedDirection.value = value
@@ -456,6 +492,16 @@ async function setDirection(value) {
 function onTypesChange() {
   page.value = 0
   if (tableExpanded.value === 'messages') load()
+}
+
+// ── Changement du filtre utilisateur (debounce 300ms) ─────────────────────────
+let utilisateurDebounceTimer = null
+function onUtilisateurChange() {
+  clearTimeout(utilisateurDebounceTimer)
+  utilisateurDebounceTimer = setTimeout(() => {
+    page.value = 0
+    if (tableExpanded.value === 'messages') load()
+  }, 300)
 }
 
 // ── Clic sur un compteur du résumé ────────────────────────────────────────────
@@ -487,6 +533,7 @@ function resetFilters() {
   selectedDirection.value = null
   selectedStatuses.value  = []
   selectedTypes.value     = []
+  filterUtilisateur.value = ''
   page.value              = 0
   if (tableExpanded.value === 'messages') load()
 }
@@ -496,11 +543,14 @@ async function load() {
   loading.value = true
   try {
     const result = await fetchMessages({
-      statuses:  selectedStatuses.value,
-      direction: selectedDirection.value,
-      types:     selectedTypes.value,
-      page:      page.value,
-      pageSize:  pageSize.value,
+      statuses:     selectedStatuses.value,
+      direction:    selectedDirection.value,
+      types:        selectedTypes.value,
+      utilisateur:  filterUtilisateur.value || undefined,
+      page:         page.value,
+      pageSize:     pageSize.value,
+      sortKey:      sortKey.value   || undefined,
+      sortOrder:    sortOrder.value || undefined,
     })
     messages.value = result.items
     total.value    = result.total

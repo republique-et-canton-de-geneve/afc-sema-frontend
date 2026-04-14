@@ -98,11 +98,24 @@ export function getMessageTypes() {
   return { role: DOMAIN_ROLE, types }
 }
 
-export function getMessages({ statuses = [], direction, types = [], page = 0, pageSize = 50 } = {}) {
+export function getMessages({ statuses = [], direction, types = [], utilisateur, page = 0, pageSize = 50, sortKey, sortOrder } = {}) {
   let messages = [...db]
-  if (statuses?.length) messages = messages.filter(m => statuses.includes(m.statut))
-  if (direction)        messages = messages.filter(m => m.direction === direction)
-  if (types?.length)    messages = messages.filter(m => types.includes(m.type))
+  if (statuses?.length)  messages = messages.filter(m => statuses.includes(m.statut))
+  if (direction)         messages = messages.filter(m => m.direction === direction)
+  if (types?.length)     messages = messages.filter(m => types.includes(m.type))
+  if (utilisateur)       messages = messages.filter(m => m.utilisateur.toLowerCase().includes(utilisateur.toLowerCase()))
+
+  if (sortKey) {
+    messages.sort((a, b) => {
+      let va = a[sortKey]
+      let vb = b[sortKey]
+      if (typeof va === 'string') va = va.toLowerCase()
+      if (typeof vb === 'string') vb = vb.toLowerCase()
+      if (va < vb) return sortOrder === 'desc' ? 1 : -1
+      if (va > vb) return sortOrder === 'desc' ? -1 : 1
+      return 0
+    })
+  }
 
   const total = messages.length
   const start = page * pageSize
