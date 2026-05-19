@@ -250,7 +250,10 @@
                 density="comfortable"
                 :items-per-page="pageSize"
                 :items-length="total"
+                :sort-by="sortBy"
+                must-sort
                 @update:page="p => { page.value = p - 1; load() }"
+                @update:sort-by="onSortByChange"
                 @click:row="(_, { item }) => openDrawer(item)"
               >
                 <template #item.statut="{ item }">
@@ -373,6 +376,10 @@ const selectedTypes     = ref(props.initialType      ? [props.initialType]      
 const availableTypes    = ref([])
 const appRole           = ref('both')
 
+// Tri (format Vuetify v-data-table : [{ key, order }]).
+// Aligné sur le défaut backend : timestamp décroissant.
+const sortBy = ref([{ key: 'timestamp', order: 'desc' }])
+
 const drawerOpen      = ref(false)
 const selectedMessage = ref(null)
 
@@ -390,13 +397,15 @@ const showDirFilter = computed(() =>
 )
 
 // ── Colonnes ──────────────────────────────────────────────────────────────────
+// Les colonnes triables correspondent aux champs autorisés par l'API
+// (MessageSortField dans openapi-sema.yml).
 const ALL_COLUMNS = [
-  { title: 'ID',          key: 'id',          sortable: false },
-  { title: 'Utilisateur', key: 'utilisateur', sortable: false },
-  { title: 'Horodatage',  key: 'timestamp',   sortable: false },
-  { title: 'Type',        key: 'type',        sortable: false },
+  { title: 'ID',          key: 'id',          sortable: true  },
+  { title: 'Utilisateur', key: 'utilisateur', sortable: true  },
+  { title: 'Horodatage',  key: 'timestamp',   sortable: true  },
+  { title: 'Type',        key: 'type',        sortable: true  },
   { title: 'Direction',   key: 'direction',   sortable: false },
-  { title: 'Statut',      key: 'statut',      sortable: false },
+  { title: 'Statut',      key: 'statut',      sortable: true  },
   { title: 'Nb rejeux',   key: 'nbRejeux',    sortable: false, align: 'center' },
 ]
 
@@ -495,12 +504,15 @@ function resetFilters() {
 async function load() {
   loading.value = true
   try {
+    const sort = sortBy.value[0]
     const result = await fetchMessages({
-      statuses:  selectedStatuses.value,
-      direction: selectedDirection.value,
-      types:     selectedTypes.value,
-      page:      page.value,
-      pageSize:  pageSize.value,
+      statuses:      selectedStatuses.value,
+      direction:     selectedDirection.value,
+      types:         selectedTypes.value,
+      page:          page.value,
+      pageSize:      pageSize.value,
+      sortBy:        sort?.key,
+      sortDirection: sort?.order,
     })
     messages.value = result.items
     total.value    = result.total
@@ -508,6 +520,13 @@ async function load() {
   } finally {
     loading.value = false
   }
+}
+
+function onSortByChange(value) {
+  // Vuetify émet [] quand l'utilisateur "désactive" le tri ; on revient au défaut.
+  sortBy.value = value.length > 0 ? value : [{ key: 'timestamp', order: 'desc' }]
+  page.value   = 0
+  if (tableExpanded.value === 'messages') load()
 }
 
 function openDrawer(message) {
