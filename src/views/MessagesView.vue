@@ -183,15 +183,6 @@
 
           <v-expansion-panel-title>
             <span class="text-subtitle-1 font-weight-medium">Liste des messages</span>
-            <v-progress-circular
-              v-if="loading"
-              indeterminate
-              size="18"
-              width="2"
-              color="primary"
-              class="ml-3"
-              aria-label="Chargement en cours"
-            />
           </v-expansion-panel-title>
 
           <v-expansion-panel-text>
@@ -251,6 +242,7 @@
             <v-card border>
               <v-data-table
                 v-model="selected"
+                :class="['sema-messages-table', { 'is-loading': loading }]"
                 :headers="headers"
                 :items="messages"
                 :loading="loading"
@@ -588,3 +580,18 @@ onMounted(async () => {
   }
 })
 </script>
+
+<style scoped>
+/* Barre de progression Vuetify : affinée à 2 px, posée en haut de la table. */
+.sema-messages-table :deep(.v-progress-linear) {
+  height: 2px !important;
+}
+
+/* Fondu discret des lignes pendant que la requête backend est en vol. */
+.sema-messages-table :deep(tbody) {
+  transition: opacity 0.18s ease;
+}
+.sema-messages-table.is-loading :deep(tbody) {
+  opacity: 0.55;
+}
+</style>
