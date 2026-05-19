@@ -183,6 +183,15 @@
 
           <v-expansion-panel-title>
             <span class="text-subtitle-1 font-weight-medium">Liste des messages</span>
+            <v-progress-circular
+              v-if="loading"
+              indeterminate
+              size="18"
+              width="2"
+              color="primary"
+              class="ml-3"
+              aria-label="Chargement en cours"
+            />
           </v-expansion-panel-title>
 
           <v-expansion-panel-text>
