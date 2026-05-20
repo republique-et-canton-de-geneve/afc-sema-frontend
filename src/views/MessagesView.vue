@@ -285,20 +285,23 @@
 
             <!-- Table -->
             <v-card border>
-              <v-data-table
+              <v-data-table-server
                 v-model="selected"
                 :class="['sema-messages-table', { 'is-loading': loading }]"
                 :headers="headers"
                 :items="messages"
                 :loading="loading"
-                item-value="id"
+                item-value="_rowKey"
                 show-select
                 density="comfortable"
+                :page="page + 1"
                 :items-per-page="pageSize"
+                :items-per-page-options="PAGE_SIZE_OPTIONS"
                 :items-length="total"
                 :sort-by="sortBy"
                 must-sort
-                @update:page="p => { page.value = p - 1; load() }"
+                @update:page="onPageChange"
+                @update:items-per-page="onItemsPerPageChange"
                 @update:sort-by="onSortByChange"
                 @click:row="(_, { item }) => openDrawer(item)"
               >
@@ -342,7 +345,7 @@
                     <div class="text-body-2">Aucun message ne correspond aux filtres.</div>
                   </div>
                 </template>
-              </v-data-table>
+              </v-data-table-server>
             </v-card>
 
           </v-expansion-panel-text>
@@ -432,6 +435,15 @@ const STATUS_OPTIONS = [
   { value: 'TRAITE',        label: 'Traité',        color: 'success' },
   { value: 'EN_ERREUR',     label: 'En erreur',     color: 'error'   },
 ]
+
+const PAGE_SIZE_OPTIONS = [10, 25, 50, 100]
+
+// L'id n'est unique qu'au sein d'une direction (DEO_IDENTIFIANT côté outbox,
+// DEI_TYPE_IDENTIFIANT côté inbox) : un même id peut donc exister en INBOX ET
+// en OUTBOX. La clé de ligne doit combiner les deux pour rester unique, sinon
+// le rendu keyé de la table mélange les lignes dès qu'un résultat croise les
+// deux directions (et le tri paraît inopérant).
+const rowKey = (m) => `${m.direction}::${m.id}`
 
 // ── State ─────────────────────────────────────────────────────────────────────
 const summary        = ref(null)
@@ -638,7 +650,7 @@ async function load() {
       sortBy:        sort?.key,
       sortDirection: sort?.order,
     })
-    messages.value = result.items
+    messages.value = result.items.map(m => ({ ...m, _rowKey: rowKey(m) }))
     total.value    = result.total
     selected.value = []
   } catch (e) {
@@ -658,13 +670,30 @@ function onSortByChange(value) {
   if (tableExpanded.value === 'messages') load()
 }
 
+// La table émet une page en base 1 ; le backend la veut en base 0.
+// Le garde évite un rechargement redondant quand un tri/filtre vient déjà de
+// remettre la page à 0 (la table émet alors aussi update:page).
+function onPageChange(p) {
+  const zeroBased = p - 1
+  if (zeroBased === page.value) return
+  page.value = zeroBased
+  load()
+}
+
+function onItemsPerPageChange(n) {
+  if (n === pageSize.value) return
+  pageSize.value = n
+  page.value     = 0
+  load()
+}
+
 function openDrawer(message) {
   selectedMessage.value = message
   drawerOpen.value = true
 }
 
 function onReplayed(updated) {
-  const idx = messages.value.findIndex(m => m.id === updated.id)
+  const idx = messages.value.findIndex(m => m._rowKey === rowKey(updated))
   if (idx !== -1) messages.value[idx] = { ...messages.value[idx], ...updated }
 }
 
@@ -687,9 +716,14 @@ async function doFilterReplay() {
 async function doBatchReplay() {
   replayingBatch.value = true
   try {
-    const result = await replayBatch(selected.value)
+    // `selected` contient des clés de ligne (direction::id) ; le backend attend
+    // les identifiants bruts.
+    const ids = messages.value
+      .filter(m => selected.value.includes(m._rowKey))
+      .map(m => m.id)
+    const result = await replayBatch(ids)
     for (const updated of result.messages) {
-      const idx = messages.value.findIndex(m => m.id === updated.id)
+      const idx = messages.value.findIndex(m => m._rowKey === rowKey(updated))
       if (idx !== -1) messages.value[idx] = { ...messages.value[idx], ...updated }
     }
     batchDialog.value = false
