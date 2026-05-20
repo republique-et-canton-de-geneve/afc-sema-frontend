@@ -268,6 +268,35 @@
                     {{ item.nbRejeux }}
                   </v-chip>
                 </template>
+
+                <!-- État vide : erreur backend explicite, sinon "aucun résultat" -->
+                <template #no-data>
+                  <div
+                    v-if="loadError"
+                    class="d-flex flex-column align-center text-center pa-8 ga-3"
+                  >
+                    <v-icon size="48" color="error">mdi-cloud-off-outline</v-icon>
+                    <div class="text-subtitle-1 font-weight-medium">{{ loadError.title }}</div>
+                    <div class="text-body-2 text-medium-emphasis" style="max-width: 360px">
+                      {{ loadError.detail }}
+                    </div>
+                    <v-btn
+                      color="primary"
+                      variant="tonal"
+                      prepend-icon="mdi-refresh"
+                      @click="load"
+                    >
+                      Réessayer
+                    </v-btn>
+                  </div>
+                  <div
+                    v-else
+                    class="d-flex flex-column align-center text-center pa-8 ga-2 text-medium-emphasis"
+                  >
+                    <v-icon size="40">mdi-inbox-outline</v-icon>
+                    <div class="text-body-2">Aucun message ne correspond aux filtres.</div>
+                  </div>
+                </template>
               </v-data-table>
             </v-card>
 
@@ -370,6 +399,7 @@ const total             = ref(0)
 const page              = ref(0)
 const pageSize          = ref(50)
 const loading           = ref(false)
+const loadError         = ref(null)
 const selected          = ref([])
 const selectedStatuses  = ref(props.initialStatus    ? [props.initialStatus]    : [])
 const selectedDirection = ref(props.initialDirection ?? null)
@@ -502,8 +532,29 @@ function resetFilters() {
 }
 
 // ── Actions liste ─────────────────────────────────────────────────────────────
+// Traduit une erreur réseau / HTTP en message affichable.
+function describeError(e) {
+  if (!e?.status) {
+    return {
+      title: 'Erreur de connexion',
+      detail: 'Le serveur est injoignable. Vérifiez votre connexion réseau, puis réessayez.',
+    }
+  }
+  if (e.status === 503) {
+    return {
+      title: 'Service indisponible',
+      detail: e.message || 'La base de données est momentanément inaccessible.',
+    }
+  }
+  return {
+    title: 'Erreur de chargement',
+    detail: e.message || `Le serveur a renvoyé une erreur (HTTP ${e.status}).`,
+  }
+}
+
 async function load() {
-  loading.value = true
+  loading.value   = true
+  loadError.value = null
   try {
     const sort = sortBy.value[0]
     const result = await fetchMessages({
@@ -518,6 +569,11 @@ async function load() {
     messages.value = result.items
     total.value    = result.total
     selected.value = []
+  } catch (e) {
+    loadError.value = describeError(e)
+    messages.value  = []
+    total.value     = 0
+    selected.value  = []
   } finally {
     loading.value = false
   }
