@@ -121,6 +121,32 @@
           </v-card>
         </template>
 
+        <!-- Erreur de chargement du résumé -->
+        <v-alert
+          v-else-if="summaryError"
+          type="error"
+          variant="tonal"
+          border="start"
+          icon="mdi-cloud-off-outline"
+          class="flex-1-1"
+        >
+          <div class="d-flex align-center ga-4 flex-wrap">
+            <div class="flex-grow-1">
+              <div class="text-subtitle-2 font-weight-medium">{{ summaryError.title }}</div>
+              <div class="text-body-2">{{ summaryError.detail }}</div>
+            </div>
+            <v-btn
+              color="error"
+              variant="tonal"
+              size="small"
+              prepend-icon="mdi-refresh"
+              @click="loadSummary"
+            >
+              Réessayer
+            </v-btn>
+          </div>
+        </v-alert>
+
         <template v-else-if="summary">
 
           <!-- INBOX -->
@@ -391,6 +417,7 @@ const STATUS_OPTIONS = [
 // ── State ─────────────────────────────────────────────────────────────────────
 const summary        = ref(null)
 const loadingSummary = ref(false)
+const summaryError   = ref(null)
 const tableExpanded  = ref(undefined)
 const tableLoaded    = ref(false)
 
@@ -469,9 +496,13 @@ function toggleColumn(key) {
 // ── Chargement du résumé ──────────────────────────────────────────────────────
 async function loadSummary() {
   loadingSummary.value = true
+  summaryError.value   = null
   try {
     summary.value = await fetchSummary()
     appRole.value = summary.value.role
+  } catch (e) {
+    summaryError.value = describeError(e)
+    summary.value      = null
   } finally {
     loadingSummary.value = false
   }
