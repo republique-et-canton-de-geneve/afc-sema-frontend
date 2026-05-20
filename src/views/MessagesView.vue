@@ -65,12 +65,15 @@
         <v-select
           v-model="selectedTypes"
           :items="availableTypes"
-          :placeholder="availableTypes.length === 0 ? 'Chargement…' : 'Tous'"
+          :placeholder="typesPlaceholder"
+          :loading="loadingTypes"
+          :error="typesError"
+          :disabled="typesError"
           multiple
           clearable
           density="compact"
           hide-details
-          class="mb-5"
+          :class="typesError ? 'mb-1' : 'mb-5'"
           @update:model-value="onTypesChange"
         >
           <template #selection="{ item, index }">
@@ -80,6 +83,22 @@
             </span>
           </template>
         </v-select>
+
+        <!-- Erreur de chargement des types -->
+        <div v-if="typesError" class="d-flex align-center ga-1 mb-5">
+          <v-icon size="x-small" color="error">mdi-alert-circle-outline</v-icon>
+          <span class="text-caption text-error">Liste indisponible</span>
+          <v-btn
+            variant="text"
+            size="x-small"
+            color="error"
+            class="px-1"
+            :loading="loadingTypes"
+            @click="loadMessageTypes"
+          >
+            Réessayer
+          </v-btn>
+        </div>
 
         <!-- Réinitialiser -->
         <v-btn
@@ -432,6 +451,8 @@ const selectedStatuses  = ref(props.initialStatus    ? [props.initialStatus]    
 const selectedDirection = ref(props.initialDirection ?? null)
 const selectedTypes     = ref(props.initialType      ? [props.initialType]      : [])
 const availableTypes    = ref([])
+const loadingTypes      = ref(false)
+const typesError        = ref(false)
 const appRole           = ref('both')
 
 // Tri (format Vuetify v-data-table : [{ key, order }]).
@@ -453,6 +474,11 @@ const hasActiveFilter = computed(() =>
 const showDirFilter = computed(() =>
   summary.value === null || (summary.value.inbox != null && summary.value.outbox != null)
 )
+const typesPlaceholder = computed(() => {
+  if (loadingTypes.value) return 'Chargement…'
+  if (typesError.value)   return 'Indisponible'
+  return 'Tous'
+})
 
 // ── Colonnes ──────────────────────────────────────────────────────────────────
 // Les colonnes triables correspondent aux champs autorisés par l'API
@@ -505,6 +531,21 @@ async function loadSummary() {
     summary.value      = null
   } finally {
     loadingSummary.value = false
+  }
+}
+
+// ── Chargement des types de messages (filtre sidebar) ──────────────────────────
+async function loadMessageTypes() {
+  loadingTypes.value = true
+  typesError.value   = false
+  try {
+    const meta = await fetchMessageTypes()
+    availableTypes.value = meta.types
+  } catch {
+    typesError.value     = true
+    availableTypes.value = []
+  } finally {
+    loadingTypes.value = false
   }
 }
 
@@ -660,8 +701,7 @@ async function doBatchReplay() {
 
 onMounted(async () => {
   await loadSummary()
-  const meta = await fetchMessageTypes()
-  availableTypes.value = meta.types
+  await loadMessageTypes()
   if (props.initialStatus || props.initialType || props.initialDirection) {
     tableExpanded.value = 'messages'
   }
