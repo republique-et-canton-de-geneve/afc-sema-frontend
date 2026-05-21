@@ -98,11 +98,27 @@ export function getMessageTypes() {
   return { role: DOMAIN_ROLE, types }
 }
 
-export function getMessages({ statuses = [], direction, types = [], page = 0, pageSize = 50 } = {}) {
+const SORTABLE_FIELDS = ['id', 'type', 'utilisateur', 'timestamp', 'statut']
+
+export function getMessages({
+  statuses = [], direction, types = [],
+  page = 0, pageSize = 50,
+  sortBy, sortDirection,
+} = {}) {
   let messages = [...db]
   if (statuses?.length) messages = messages.filter(m => statuses.includes(m.statut))
   if (direction)        messages = messages.filter(m => m.direction === direction)
   if (types?.length)    messages = messages.filter(m => types.includes(m.type))
+
+  const field = SORTABLE_FIELDS.includes(sortBy) ? sortBy : 'timestamp'
+  const dir   = sortDirection === 'asc' ? 1 : -1
+  messages.sort((a, b) => {
+    const av = a[field]
+    const bv = b[field]
+    if (av < bv) return -1 * dir
+    if (av > bv) return  1 * dir
+    return 0
+  })
 
   const total = messages.length
   const start = page * pageSize

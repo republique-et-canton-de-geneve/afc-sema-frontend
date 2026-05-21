@@ -65,12 +65,15 @@
         <v-select
           v-model="selectedTypes"
           :items="availableTypes"
-          :placeholder="availableTypes.length === 0 ? 'Chargement…' : 'Tous'"
+          :placeholder="typesPlaceholder"
+          :loading="loadingTypes"
+          :error="typesError"
+          :disabled="typesError"
           multiple
           clearable
           density="compact"
           hide-details
-          class="mb-5"
+          :class="typesError ? 'mb-1' : 'mb-5'"
           @update:model-value="onTypesChange"
         >
           <template #selection="{ item, index }">
@@ -80,6 +83,22 @@
             </span>
           </template>
         </v-select>
+
+        <!-- Erreur de chargement des types -->
+        <div v-if="typesError" class="d-flex align-center ga-1 mb-5">
+          <v-icon size="x-small" color="error">mdi-alert-circle-outline</v-icon>
+          <span class="text-caption text-error">Liste indisponible</span>
+          <v-btn
+            variant="text"
+            size="x-small"
+            color="error"
+            class="px-1"
+            :loading="loadingTypes"
+            @click="loadMessageTypes"
+          >
+            Réessayer
+          </v-btn>
+        </div>
 
         <!-- Réinitialiser -->
         <v-btn
@@ -120,6 +139,32 @@
             <v-card-text><v-skeleton-loader type="heading, list-item-two-line"/></v-card-text>
           </v-card>
         </template>
+
+        <!-- Erreur de chargement du résumé -->
+        <v-alert
+          v-else-if="summaryError"
+          type="error"
+          variant="tonal"
+          border="start"
+          icon="mdi-cloud-off-outline"
+          class="flex-1-1"
+        >
+          <div class="d-flex align-center ga-4 flex-wrap">
+            <div class="flex-grow-1">
+              <div class="text-subtitle-2 font-weight-medium">{{ summaryError.title }}</div>
+              <div class="text-body-2">{{ summaryError.detail }}</div>
+            </div>
+            <v-btn
+              color="error"
+              variant="tonal"
+              size="small"
+              prepend-icon="mdi-refresh"
+              @click="loadSummary"
+            >
+              Réessayer
+            </v-btn>
+          </div>
+        </v-alert>
 
         <template v-else-if="summary">
 
@@ -240,17 +285,24 @@
 
             <!-- Table -->
             <v-card border>
-              <v-data-table
+              <v-data-table-server
                 v-model="selected"
+                :class="['sema-messages-table', { 'is-loading': loading }]"
                 :headers="headers"
                 :items="messages"
                 :loading="loading"
-                item-value="id"
+                item-value="_rowKey"
                 show-select
                 density="comfortable"
+                :page="page + 1"
                 :items-per-page="pageSize"
+                :items-per-page-options="PAGE_SIZE_OPTIONS"
                 :items-length="total"
-                @update:page="p => { page.value = p - 1; load() }"
+                :sort-by="sortBy"
+                must-sort
+                @update:page="onPageChange"
+                @update:items-per-page="onItemsPerPageChange"
+                @update:sort-by="onSortByChange"
                 @click:row="(_, { item }) => openDrawer(item)"
               >
                 <template #item.statut="{ item }">
@@ -264,7 +316,36 @@
                     {{ item.nbRejeux }}
                   </v-chip>
                 </template>
-              </v-data-table>
+
+                <!-- État vide : erreur backend explicite, sinon "aucun résultat" -->
+                <template #no-data>
+                  <div
+                    v-if="loadError"
+                    class="d-flex flex-column align-center text-center pa-8 ga-3"
+                  >
+                    <v-icon size="48" color="error">mdi-cloud-off-outline</v-icon>
+                    <div class="text-subtitle-1 font-weight-medium">{{ loadError.title }}</div>
+                    <div class="text-body-2 text-medium-emphasis" style="max-width: 360px">
+                      {{ loadError.detail }}
+                    </div>
+                    <v-btn
+                      color="primary"
+                      variant="tonal"
+                      prepend-icon="mdi-refresh"
+                      @click="load"
+                    >
+                      Réessayer
+                    </v-btn>
+                  </div>
+                  <div
+                    v-else
+                    class="d-flex flex-column align-center text-center pa-8 ga-2 text-medium-emphasis"
+                  >
+                    <v-icon size="40">mdi-inbox-outline</v-icon>
+                    <div class="text-body-2">Aucun message ne correspond aux filtres.</div>
+                  </div>
+                </template>
+              </v-data-table-server>
             </v-card>
 
           </v-expansion-panel-text>
@@ -355,9 +436,19 @@ const STATUS_OPTIONS = [
   { value: 'EN_ERREUR',     label: 'En erreur',     color: 'error'   },
 ]
 
+const PAGE_SIZE_OPTIONS = [10, 25, 50, 100]
+
+// L'id n'est unique qu'au sein d'une direction (DEO_IDENTIFIANT côté outbox,
+// DEI_TYPE_IDENTIFIANT côté inbox) : un même id peut donc exister en INBOX ET
+// en OUTBOX. La clé de ligne doit combiner les deux pour rester unique, sinon
+// le rendu keyé de la table mélange les lignes dès qu'un résultat croise les
+// deux directions (et le tri paraît inopérant).
+const rowKey = (m) => `${m.direction}::${m.id}`
+
 // ── State ─────────────────────────────────────────────────────────────────────
 const summary        = ref(null)
 const loadingSummary = ref(false)
+const summaryError   = ref(null)
 const tableExpanded  = ref(undefined)
 const tableLoaded    = ref(false)
 
@@ -366,12 +457,19 @@ const total             = ref(0)
 const page              = ref(0)
 const pageSize          = ref(50)
 const loading           = ref(false)
+const loadError         = ref(null)
 const selected          = ref([])
 const selectedStatuses  = ref(props.initialStatus    ? [props.initialStatus]    : [])
 const selectedDirection = ref(props.initialDirection ?? null)
 const selectedTypes     = ref(props.initialType      ? [props.initialType]      : [])
 const availableTypes    = ref([])
+const loadingTypes      = ref(false)
+const typesError        = ref(false)
 const appRole           = ref('both')
+
+// Tri (format Vuetify v-data-table : [{ key, order }]).
+// Aligné sur le défaut backend : timestamp décroissant.
+const sortBy = ref([{ key: 'timestamp', order: 'desc' }])
 
 const drawerOpen      = ref(false)
 const selectedMessage = ref(null)
@@ -388,15 +486,22 @@ const hasActiveFilter = computed(() =>
 const showDirFilter = computed(() =>
   summary.value === null || (summary.value.inbox != null && summary.value.outbox != null)
 )
+const typesPlaceholder = computed(() => {
+  if (loadingTypes.value) return 'Chargement…'
+  if (typesError.value)   return 'Indisponible'
+  return 'Tous'
+})
 
 // ── Colonnes ──────────────────────────────────────────────────────────────────
+// Les colonnes triables correspondent aux champs autorisés par l'API
+// (MessageSortField dans openapi-sema.yml).
 const ALL_COLUMNS = [
-  { title: 'ID',          key: 'id',          sortable: false },
-  { title: 'Utilisateur', key: 'utilisateur', sortable: false },
-  { title: 'Horodatage',  key: 'timestamp',   sortable: false },
-  { title: 'Type',        key: 'type',        sortable: false },
+  { title: 'ID',          key: 'id',          sortable: true  },
+  { title: 'Utilisateur', key: 'utilisateur', sortable: true  },
+  { title: 'Horodatage',  key: 'timestamp',   sortable: true  },
+  { title: 'Type',        key: 'type',        sortable: true  },
   { title: 'Direction',   key: 'direction',   sortable: false },
-  { title: 'Statut',      key: 'statut',      sortable: false },
+  { title: 'Statut',      key: 'statut',      sortable: true  },
   { title: 'Nb rejeux',   key: 'nbRejeux',    sortable: false, align: 'center' },
 ]
 
@@ -429,11 +534,30 @@ function toggleColumn(key) {
 // ── Chargement du résumé ──────────────────────────────────────────────────────
 async function loadSummary() {
   loadingSummary.value = true
+  summaryError.value   = null
   try {
     summary.value = await fetchSummary()
     appRole.value = summary.value.role
+  } catch (e) {
+    summaryError.value = describeError(e)
+    summary.value      = null
   } finally {
     loadingSummary.value = false
+  }
+}
+
+// ── Chargement des types de messages (filtre sidebar) ──────────────────────────
+async function loadMessageTypes() {
+  loadingTypes.value = true
+  typesError.value   = false
+  try {
+    const meta = await fetchMessageTypes()
+    availableTypes.value = meta.types
+  } catch {
+    typesError.value     = true
+    availableTypes.value = []
+  } finally {
+    loadingTypes.value = false
   }
 }
 
@@ -492,22 +616,75 @@ function resetFilters() {
 }
 
 // ── Actions liste ─────────────────────────────────────────────────────────────
+// Traduit une erreur réseau / HTTP en message affichable.
+function describeError(e) {
+  if (!e?.status) {
+    return {
+      title: 'Erreur de connexion',
+      detail: 'Le serveur est injoignable. Vérifiez votre connexion réseau, puis réessayez.',
+    }
+  }
+  if (e.status === 503) {
+    return {
+      title: 'Service indisponible',
+      detail: e.message || 'La base de données est momentanément inaccessible.',
+    }
+  }
+  return {
+    title: 'Erreur de chargement',
+    detail: e.message || `Le serveur a renvoyé une erreur (HTTP ${e.status}).`,
+  }
+}
+
 async function load() {
-  loading.value = true
+  loading.value   = true
+  loadError.value = null
   try {
+    const sort = sortBy.value[0]
     const result = await fetchMessages({
-      statuses:  selectedStatuses.value,
-      direction: selectedDirection.value,
-      types:     selectedTypes.value,
-      page:      page.value,
-      pageSize:  pageSize.value,
+      statuses:      selectedStatuses.value,
+      direction:     selectedDirection.value,
+      types:         selectedTypes.value,
+      page:          page.value,
+      pageSize:      pageSize.value,
+      sortBy:        sort?.key,
+      sortDirection: sort?.order,
     })
-    messages.value = result.items
+    messages.value = result.items.map(m => ({ ...m, _rowKey: rowKey(m) }))
     total.value    = result.total
     selected.value = []
+  } catch (e) {
+    loadError.value = describeError(e)
+    messages.value  = []
+    total.value     = 0
+    selected.value  = []
   } finally {
     loading.value = false
   }
+}
+
+function onSortByChange(value) {
+  // Vuetify émet [] quand l'utilisateur "désactive" le tri ; on revient au défaut.
+  sortBy.value = value.length > 0 ? value : [{ key: 'timestamp', order: 'desc' }]
+  page.value   = 0
+  if (tableExpanded.value === 'messages') load()
+}
+
+// La table émet une page en base 1 ; le backend la veut en base 0.
+// Le garde évite un rechargement redondant quand un tri/filtre vient déjà de
+// remettre la page à 0 (la table émet alors aussi update:page).
+function onPageChange(p) {
+  const zeroBased = p - 1
+  if (zeroBased === page.value) return
+  page.value = zeroBased
+  load()
+}
+
+function onItemsPerPageChange(n) {
+  if (n === pageSize.value) return
+  pageSize.value = n
+  page.value     = 0
+  load()
 }
 
 function openDrawer(message) {
@@ -516,7 +693,7 @@ function openDrawer(message) {
 }
 
 function onReplayed(updated) {
-  const idx = messages.value.findIndex(m => m.id === updated.id)
+  const idx = messages.value.findIndex(m => m._rowKey === rowKey(updated))
   if (idx !== -1) messages.value[idx] = { ...messages.value[idx], ...updated }
 }
 
@@ -539,9 +716,14 @@ async function doFilterReplay() {
 async function doBatchReplay() {
   replayingBatch.value = true
   try {
-    const result = await replayBatch(selected.value)
+    // `selected` contient des clés de ligne (direction::id) ; le backend attend
+    // les identifiants bruts.
+    const ids = messages.value
+      .filter(m => selected.value.includes(m._rowKey))
+      .map(m => m.id)
+    const result = await replayBatch(ids)
     for (const updated of result.messages) {
-      const idx = messages.value.findIndex(m => m.id === updated.id)
+      const idx = messages.value.findIndex(m => m._rowKey === rowKey(updated))
       if (idx !== -1) messages.value[idx] = { ...messages.value[idx], ...updated }
     }
     batchDialog.value = false
@@ -553,10 +735,24 @@ async function doBatchReplay() {
 
 onMounted(async () => {
   await loadSummary()
-  const meta = await fetchMessageTypes()
-  availableTypes.value = meta.types
+  await loadMessageTypes()
   if (props.initialStatus || props.initialType || props.initialDirection) {
     tableExpanded.value = 'messages'
   }
 })
 </script>
+
+<style scoped>
+/* Barre de progression Vuetify : affinée à 2 px, posée en haut de la table. */
+.sema-messages-table :deep(.v-progress-linear) {
+  height: 2px !important;
+}
+
+/* Fondu discret des lignes pendant que la requête backend est en vol. */
+.sema-messages-table :deep(tbody) {
+  transition: opacity 0.18s ease;
+}
+.sema-messages-table.is-loading :deep(tbody) {
+  opacity: 0.55;
+}
+</style>

@@ -117,6 +117,18 @@ paths:
             minimum: 1
             maximum: 200
             default: 50
+        - name: sortBy
+          in: query
+          description: >
+            Champ utilisé pour le tri.
+            Si absent, le tri par défaut est appliqué (timestamp).
+          schema:
+            $ref: "#/components/schemas/MessageSortField"
+        - name: sortDirection
+          in: query
+          description: Sens du tri (asc = croissant, desc = décroissant)
+          schema:
+            $ref: "#/components/schemas/SortDirection"
       responses:
         "200":
           description: Liste retournée avec succès
@@ -395,6 +407,26 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/MessageSummary"
+
+    MessageSortField:
+      type: string
+      description: >
+        Champ sur lequel appliquer le tri de la liste des messages.
+        Limité aux colonnes disposant d'un mapping dans les tables Inbox et Outbox.
+      enum:
+        - id
+        - type
+        - utilisateur
+        - timestamp
+        - statut
+
+    SortDirection:
+      type: string
+      description: Sens du tri
+      enum:
+        - asc
+        - desc
+      default: desc
 
     # ── Rejeu ────────────────────────────────────────────────────────────────────
 
