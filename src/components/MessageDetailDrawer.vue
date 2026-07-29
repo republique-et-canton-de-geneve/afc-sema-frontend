@@ -5,7 +5,7 @@
     temporary
     width="480"
   >
-    <template v-if="message">
+    <template v-if="current">
       <!-- Header -->
       <v-toolbar color="surface" border="b">
         <v-toolbar-title class="text-body-1 font-weight-bold">
@@ -19,8 +19,8 @@
       <v-container class="pa-4">
         <!-- Statut -->
         <div class="d-flex align-center mb-4 ga-2">
-          <StatusChip :status="message.statut"/>
-          <span class="text-caption text-medium-emphasis">{{ message.id }}</span>
+          <StatusChip :status="current.statut"/>
+          <span class="text-caption text-medium-emphasis">{{ current.id }}</span>
         </div>
 
         <!-- Métadonnées principales -->
@@ -33,14 +33,71 @@
           </tbody>
         </v-table>
 
-        <!-- Note V1 -->
-        <v-alert type="info" variant="tonal" density="compact" class="mb-4" icon="mdi-information">
-          <span class="text-caption">Message d'erreur brut : non disponible en V1</span>
+        <!-- Historique des traitements -->
+        <div class="d-flex align-center mb-2 ga-2">
+          <span class="text-subtitle-2 font-weight-medium">Historique des traitements</span>
+          <v-chip v-if="detail?.traitements?.length" size="x-small" label>{{ detail.traitements.length }}</v-chip>
+        </div>
+
+        <div v-if="loadingDetail" class="d-flex justify-center pa-4">
+          <v-progress-circular indeterminate size="24"/>
+        </div>
+
+        <v-alert
+          v-else-if="detailError"
+          type="error" variant="tonal" density="compact"
+          class="mb-4" icon="mdi-cloud-off-outline"
+        >
+          <div class="text-body-2 mb-2">{{ detailError }}</div>
+          <v-btn size="x-small" variant="tonal" color="error" @click="loadDetail">Réessayer</v-btn>
         </v-alert>
+
+        <div
+          v-else-if="!detail?.traitements?.length"
+          class="text-body-2 text-medium-emphasis text-center pa-4 rounded border"
+        >
+          Aucune tentative de traitement enregistrée pour ce message.
+        </div>
+
+        <v-timeline v-else density="compact" side="end" truncate-line="both" class="mb-4">
+          <v-timeline-item
+            v-for="tr in detail.traitements"
+            :key="tr.traitementId ?? tr.numeroTentative"
+            :dot-color="tr.statut === 'SUCCES' ? 'success' : 'error'"
+            :icon="tr.statut === 'SUCCES' ? 'mdi-check' : 'mdi-close'"
+            size="small"
+            fill-dot
+          >
+            <div class="d-flex align-center ga-2 mb-1 flex-wrap">
+              <span class="text-body-2 font-weight-medium">Tentative n°{{ tr.numeroTentative }}</span>
+              <v-chip size="x-small" :color="tr.statut === 'SUCCES' ? 'success' : 'error'" label>
+                {{ tr.statut === 'SUCCES' ? 'Succès' : 'Échec' }}
+              </v-chip>
+            </div>
+            <div class="text-caption text-medium-emphasis">
+              {{ formatDate(tr.dateDebut ?? tr.dateCreation) }}
+              <template v-if="tr.dateFin"> → {{ formatDate(tr.dateFin) }}</template>
+            </div>
+            <div class="text-caption text-medium-emphasis">
+              {{ tr.workerHostname ?? '—' }}<template v-if="tr.workerIp"> ({{ tr.workerIp }})</template>
+            </div>
+            <div v-if="tr.correlationId" class="text-caption text-medium-emphasis font-mono">
+              {{ tr.correlationId }}
+            </div>
+            <v-alert
+              v-if="tr.statut === 'ERREUR'"
+              type="error" variant="tonal" density="compact"
+              class="mt-2" icon="mdi-alert-circle-outline"
+            >
+              <div class="text-caption font-weight-bold">{{ ERREUR_CATEGORIE_LABELS[tr.erreurCategorie] ?? tr.erreurCategorie }}</div>
+              <div class="text-caption">{{ tr.erreurMessage ?? 'Cause inconnue' }}</div>
+            </v-alert>
+          </v-timeline-item>
+        </v-timeline>
 
         <!-- Action replay -->
         <v-btn
-          v-if="message.statut === 'EN_ERREUR'"
+          v-if="current.statut === 'EN_ERREUR'"
           color="warning"
           variant="flat"
           block
@@ -65,7 +122,7 @@
     <v-card>
       <v-card-title class="text-h6">Confirmer le rejeu</v-card-title>
       <v-card-text>
-        Êtes-vous sûr de vouloir rejouer le message <strong>{{ message?.id }}</strong> ?
+        Êtes-vous sûr de vouloir rejouer le message <strong>{{ current?.id }}</strong> ?
         Son statut passera à <strong>A_TRAITER</strong>.
       </v-card-text>
       <v-card-actions>
@@ -80,13 +137,15 @@
 </template>
 
 <script setup>
-import { computed, ref } from 'vue'
-import { replaySingle } from '../services/api.js'
+import { computed, ref, watch } from 'vue'
+import { fetchMessage, replaySingle } from '../services/api.js'
 import StatusChip from './StatusChip.vue'
 
 const model = defineModel({ type: Boolean, default: false })
 
 const props = defineProps({
+  // Ligne de la liste (MessageSummary) : sert d'affichage optimiste pendant
+  // que le détail (avec l'historique des traitements) se charge.
   message: { type: Object, default: null },
 })
 
@@ -95,25 +154,61 @@ const emit = defineEmits(['replayed'])
 const confirmDialog = ref(false)
 const replaying     = ref(false)
 
+const detail        = ref(null)
+const loadingDetail  = ref(false)
+const detailError    = ref(null)
+
+// MessageDetail une fois chargé, sinon retombe sur la ligne de liste (résumé).
+const current = computed(() => detail.value ?? props.message)
+
+const ERREUR_CATEGORIE_LABELS = {
+  METIER:     'Erreur métier',
+  TECHNIQUE:  'Erreur technique',
+  INATTENDUE: 'Erreur inattendue',
+}
+
+function formatDate(iso) {
+  return new Date(iso).toLocaleString('fr-CH', { timeZone: 'Europe/Zurich' })
+}
+
 const metaRows = computed(() => {
-  if (!props.message) return []
-  const m = props.message
+  if (!current.value) return []
+  const m = current.value
   return [
     { label: 'Direction',   value: m.direction },
     { label: 'Type',        value: m.type },
     { label: 'Utilisateur', value: m.utilisateur },
-    { label: 'Horodatage',  value: new Date(m.timestamp).toLocaleString('fr-CH', { timeZone: 'Europe/Zurich' }) },
-    { label: 'Nb rejeux',   value: m.nbRejeux },
-    ...(m.nbTentativesEnvoi != null ? [{ label: 'Tentatives envoi', value: m.nbTentativesEnvoi }] : []),
-    ...(m.datePublication   ? [{ label: 'Date publication',  value: new Date(m.datePublication).toLocaleString('fr-CH', { timeZone: 'Europe/Zurich' }) }] : []),
+    { label: 'Horodatage',  value: formatDate(m.timestamp) },
   ]
 })
 
-async function doReplay() {
+async function loadDetail() {
   if (!props.message) return
+  loadingDetail.value = true
+  detailError.value   = null
+  detail.value         = null
+  try {
+    detail.value = await fetchMessage(props.message.id)
+  } catch (e) {
+    detailError.value = e.status === 503
+      ? 'Le service est momentanément indisponible.'
+      : (e.message || 'Impossible de charger le détail du message.')
+  } finally {
+    loadingDetail.value = false
+  }
+}
+
+// Recharge le détail (et son historique de traitements) à chaque ouverture.
+watch([model, () => props.message?.id], ([open]) => {
+  if (open && props.message) loadDetail()
+})
+
+async function doReplay() {
+  if (!current.value) return
   replaying.value = true
   try {
-    const updated = await replaySingle(props.message.id)
+    const updated = await replaySingle(current.value.id)
+    detail.value = updated
     emit('replayed', updated)
     confirmDialog.value = false
     model.value = false
