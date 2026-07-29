@@ -27,7 +27,7 @@ paths:
     get:
       operationId: getSummary
       summary: Compteurs par statut pour l'inbox et/ou l'outbox de l'application du domaine
-      tags: [summary]
+      tags: [ summary ]
       responses:
         "200":
           description: Compteurs retournés avec succès
@@ -56,7 +56,7 @@ paths:
     get:
       operationId: getMessageTypes
       summary: Types de messages distincts présents dans les tables de l'application
-      tags: [summary]
+      tags: [ summary ]
       responses:
         "200":
           description: Liste des types retournée avec succès
@@ -79,7 +79,7 @@ paths:
     get:
       operationId: getMessages
       summary: Liste paginée des messages de l'application (métadonnées uniquement, sans payload)
-      tags: [messages]
+      tags: [ messages ]
       parameters:
         - name: direction
           in: query
@@ -94,7 +94,7 @@ paths:
             type: array
             items:
               $ref: "#/components/schemas/MessageStatus"
-          example: [EN_ERREUR]
+          example: [ EN_ERREUR ]
         - name: types
           in: query
           description: Filtrer sur un ou plusieurs types de messages
@@ -103,7 +103,7 @@ paths:
             type: array
             items:
               type: string
-          example: [ORDER_CREATED]
+          example: [ ORDER_CREATED ]
         - name: page
           in: query
           schema:
@@ -145,7 +145,7 @@ paths:
     get:
       operationId: getMessage
       summary: Détail d'un message (métadonnées uniquement, sans payload)
-      tags: [messages]
+      tags: [ messages ]
       parameters:
         - $ref: "#/components/parameters/messageId"
       responses:
@@ -166,7 +166,7 @@ paths:
     post:
       operationId: replaySingle
       summary: Rejouer un message (SET statut = 'A_TRAITER')
-      tags: [replay]
+      tags: [ replay ]
       parameters:
         - $ref: "#/components/parameters/messageId"
       responses:
@@ -193,7 +193,7 @@ paths:
     post:
       operationId: replayBatch
       summary: Rejouer une sélection de messages par leurs identifiants
-      tags: [replay]
+      tags: [ replay ]
       requestBody:
         required: true
         content:
@@ -222,7 +222,7 @@ paths:
                     utilisateur: user.dupont
                     timestamp: "2026-03-01T10:23:00Z"
                     statut: A_TRAITER
-                    nbRejeux: 1
+                    traitements: []
         "400":
           $ref: "#/components/responses/BadRequest"
         "503":
@@ -234,7 +234,7 @@ paths:
       summary: >
         Rejouer tous les messages correspondant aux filtres (UPDATE ... WHERE).
         Aucune limite de pagination — tous les messages correspondants sont traités.
-      tags: [replay]
+      tags: [ replay ]
       requestBody:
         required: true
         content:
@@ -243,8 +243,8 @@ paths:
               $ref: "#/components/schemas/ReplayByFilterRequest"
             example:
               direction: inbox
-              statuses: [EN_ERREUR]
-              types: [ORDER_CREATED]
+              statuses: [ EN_ERREUR ]
+              types: [ ORDER_CREATED ]
       responses:
         "200":
           description: Messages remis en file — retourne le nombre de messages rejoués
@@ -268,7 +268,7 @@ components:
       name: messageId
       in: path
       required: true
-      description: Identifiant du message (DEO_IDENTIFIANT ou DEI_TYPE_IDENTIFIANT)
+      description: Identifiant du message (DEO_IDENTIFIANT)
       schema:
         type: string
       example: 550e8400-e29b-41d4-a716-446655440000
@@ -279,15 +279,15 @@ components:
 
     MessageStatus:
       type: string
-      enum: [A_TRAITER, EN_TRAITEMENT, TRAITE, EN_ERREUR]
+      enum: [ A_TRAITER, EN_TRAITEMENT, TRAITE, EN_ERREUR ]
 
     Direction:
       type: string
-      enum: [inbox, outbox]
+      enum: [ INBOX, OUTBOX ]
 
     Role:
       type: string
-      enum: [both, producer, consumer]
+      enum: [ both, producer, consumer ]
       description: >
         Rôle de l'application : both = inbox + outbox, producer = outbox uniquement,
         consumer = inbox uniquement.
@@ -297,7 +297,7 @@ components:
     StatusCounts:
       type: object
       description: Nombre de messages par statut
-      required: [A_TRAITER, EN_TRAITEMENT, TRAITE, EN_ERREUR]
+      required: [ A_TRAITER, EN_TRAITEMENT, TRAITE, EN_ERREUR ]
       properties:
         A_TRAITER:
           type: integer
@@ -314,7 +314,7 @@ components:
 
     SummaryResponse:
       type: object
-      required: [role]
+      required: [ role ]
       properties:
         role:
           $ref: "#/components/schemas/Role"
@@ -333,7 +333,7 @@ components:
 
     MessageTypesResponse:
       type: object
-      required: [role, types]
+      required: [ role, types ]
       properties:
         role:
           $ref: "#/components/schemas/Role"
@@ -348,11 +348,11 @@ components:
     MessageSummary:
       type: object
       description: Métadonnées d'un message. Le payload n'est jamais retourné.
-      required: [id, direction, type, utilisateur, timestamp, statut, nbRejeux]
+      required: [ id, direction, type, utilisateur, timestamp, statut ]
       properties:
         id:
           type: string
-          description: DEO_IDENTIFIANT (outbox) ou DEI_TYPE_IDENTIFIANT (inbox)
+          description: DEO_IDENTIFIANT (outbox) ou DEI_IDENTIFIANT (inbox)
         direction:
           $ref: "#/components/schemas/Direction"
         type:
@@ -364,34 +364,86 @@ components:
         timestamp:
           type: string
           format: date-time
-          description: DEO_DATE_INSERTION (outbox) ou DEI_DATE_RECEPTION (inbox)
+          description: DEO_DATE_CREATION (outbox) ou DEI_DATE_CREATION (inbox)
         statut:
           $ref: "#/components/schemas/MessageStatus"
-        nbRejeux:
+
+    TraitementsStatut:
+      type: string
+      enum: [ SUCCES, ERREUR ]
+      description: Statut d'une tentative de traitement (succès ou échec)
+
+    ErreurCategorie:
+      type: string
+      enum: [ METIER, TECHNIQUE, INATTENDUE ]
+      description: Catégorie de l'erreur enregistrée sur une tentative
+
+    TraitementDetail:
+      type: object
+      description: Détail d'une tentative de traitement de la table B (historique)
+      required: [ numeroTentative, statut, workerIp, dateCreation ]
+      properties:
+        traitementId:
           type: integer
-          minimum: 0
-          description: Nombre de rejeux manuels effectués sur ce message
+          format: int64
+          description: DTM_ID — identifiant technique de la tentative
+        numeroTentative:
+          type: integer
+          minimum: 1
+          description: Numéro de la tentative (1 = premier passage)
+        statut:
+          $ref: "#/components/schemas/TraitementsStatut"
+        dateCreation:
+          type: string
+          format: date-time
+          description: DTM_DATE_CREATION — date de création de la tentative
+        dateDebut:
+          type: string
+          format: date-time
+          nullable: true
+          description: DTM_DATE_DEBUT — date de prise en charge par le worker
+        dateFin:
+          type: string
+          format: date-time
+          nullable: true
+          description: DTM_DATE_FIN — date de fin (succès ou échec)
+        workerIp:
+          type: string
+          nullable: true
+          description: DTM_WORKER_IP — IP du worker qui a traité la tentative
+        workerHostname:
+          type: string
+          nullable: true
+          description: DTM_WORKER_HOSTNAME — hostname du worker
+        correlationId:
+          type: string
+          nullable: true
+          description: DTM_CORRELATION_ID — corrélation de la tentative
+        erreurCategorie:
+          $ref: "#/components/schemas/ErreurCategorie"
+          nullable: true
+          description: DTM_ERREUR_CATEGORIE — catégorie si la tentative a échoué
+        erreurMessage:
+          type: string
+          nullable: true
+          description: DTM_ERREUR_MESSAGE — cause d'erreur de la tentative
 
     MessageDetail:
       allOf:
         - $ref: "#/components/schemas/MessageSummary"
         - type: object
-          description: Champs supplémentaires disponibles sur le détail (outbox uniquement)
+          description: Détail complet du message incluant son historique de traitements
           properties:
-            nbTentativesEnvoi:
-              type: integer
-              minimum: 0
+            traitements:
+              type: array
               nullable: true
-              description: DEO_NB_TENTATIVE_ENVOI — présent uniquement pour les messages outbox
-            datePublication:
-              type: string
-              format: date-time
-              nullable: true
-              description: DEO_DATE_PUBLICATION — présent uniquement pour les messages outbox
+              description: Table B — historique des tentatives de traitement pour ce message. Retourne les tentatives dans l'ordre de numeroTentative croissant.
+              items:
+                $ref: "#/components/schemas/TraitementDetail"
 
     MessagePage:
       type: object
-      required: [total, page, pageSize, items]
+      required: [ total, page, pageSize, items ]
       properties:
         total:
           type: integer
@@ -432,7 +484,7 @@ components:
 
     ReplayBatchRequest:
       type: object
-      required: [ids]
+      required: [ ids ]
       properties:
         ids:
           type: array
@@ -461,7 +513,7 @@ components:
 
     ReplayResult:
       type: object
-      required: [replayed]
+      required: [ replayed ]
       properties:
         replayed:
           type: integer
@@ -472,7 +524,7 @@ components:
       allOf:
         - $ref: "#/components/schemas/ReplayResult"
         - type: object
-          required: [messages]
+          required: [ messages ]
           properties:
             messages:
               type: array
@@ -486,7 +538,7 @@ components:
 
     ErrorResponse:
       type: object
-      required: [error]
+      required: [ error ]
       properties:
         error:
           type: string
