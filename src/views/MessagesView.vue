@@ -311,11 +311,6 @@
                 <template #item.timestamp="{ item }">
                   {{ new Date(item.timestamp).toLocaleString('fr-CH', { timeZone: 'Europe/Zurich' }) }}
                 </template>
-                <template #item.nbRejeux="{ item }">
-                  <v-chip size="x-small" :color="item.nbRejeux > 0 ? 'warning' : 'default'" label>
-                    {{ item.nbRejeux }}
-                  </v-chip>
-                </template>
 
                 <!-- État vide : erreur backend explicite, sinon "aucun résultat" -->
                 <template #no-data>
@@ -502,7 +497,6 @@ const ALL_COLUMNS = [
   { title: 'Type',        key: 'type',        sortable: true  },
   { title: 'Direction',   key: 'direction',   sortable: false },
   { title: 'Statut',      key: 'statut',      sortable: true  },
-  { title: 'Nb rejeux',   key: 'nbRejeux',    sortable: false, align: 'center' },
 ]
 
 const LS_KEY = 'sema:visibleColumns'

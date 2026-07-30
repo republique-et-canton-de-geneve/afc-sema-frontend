@@ -20,6 +20,106 @@ const PROFILE = {
 const USERS = ['user.dupont', 'user.martin', 'user.bernard', 'user.leroy',
                'system', 'batch.job', 'api.gateway', 'scheduler']
 
+// ─── Historique des traitements (table B) ─────────────────────────────────────
+const WORKER_HOSTS = ['worker-01.internal', 'worker-02.internal', 'worker-03.internal']
+
+const ERREUR_MESSAGES = {
+  METIER: [
+    'Client inconnu en base',
+    'Montant négatif refusé',
+    'Devise non supportée',
+    "Commande déjà clôturée",
+  ],
+  TECHNIQUE: [
+    'Timeout base de données',
+    'Connexion au service de facturation perdue',
+    'Erreur de sérialisation JSON',
+    "File d'attente saturée",
+  ],
+  INATTENDUE: [
+    'NullPointerException au niveau du mapper',
+    'Erreur interne non catégorisée',
+    "Dépassement de la pile d'exécution",
+  ],
+}
+const ERREUR_CATEGORIES = Object.keys(ERREUR_MESSAGES)
+
+let traitementId = 1
+
+function randomIp() {
+  return `10.${1 + Math.floor(Math.random() * 254)}.${1 + Math.floor(Math.random() * 254)}.${1 + Math.floor(Math.random() * 254)}`
+}
+
+function randomCorrelationId() {
+  return `corr-${Math.random().toString(16).slice(2, 10)}`
+}
+
+// Construit une tentative de traitement (ligne de la table B), calée sur `startMs`.
+function makeTraitement(numeroTentative, statut, startMs) {
+  const dateCreation = startMs
+  const dateDebut     = Math.min(dateCreation + 1000 + Math.random() * 4000,  Date.now())
+  const dateFin       = Math.min(dateDebut     + 500  + Math.random() * 8000, Date.now())
+
+  const traitement = {
+    traitementId: traitementId++,
+    numeroTentative,
+    statut,
+    dateCreation:     new Date(dateCreation).toISOString(),
+    dateDebut:        new Date(dateDebut).toISOString(),
+    dateFin:          new Date(dateFin).toISOString(),
+    workerIp:         randomIp(),
+    workerHostname:   WORKER_HOSTS[Math.floor(Math.random() * WORKER_HOSTS.length)],
+    correlationId:    randomCorrelationId(),
+    erreurCategorie:  null,
+    erreurMessage:    null,
+  }
+
+  if (statut === 'ERREUR') {
+    const categorie = ERREUR_CATEGORIES[Math.floor(Math.random() * ERREUR_CATEGORIES.length)]
+    const messages  = ERREUR_MESSAGES[categorie]
+    traitement.erreurCategorie = categorie
+    traitement.erreurMessage   = messages[Math.floor(Math.random() * messages.length)]
+  }
+
+  return traitement
+}
+
+// Génère l'historique des tentatives cohérent avec le statut courant du message :
+// - TRAITE        : 0 à 2 échecs puis un succès
+// - EN_ERREUR     : 1 à 3 échecs (le dernier explique le statut courant)
+// - A_TRAITER / EN_TRAITEMENT : 0 ou 1 échec antérieur, la tentative en cours
+//   n'a pas encore de ligne tant qu'elle n'est pas terminée
+function makeTraitements(status, messageTimestampIso) {
+  let nbEchecsAvant
+  let ajouteSucces = false
+
+  switch (status) {
+    case 'TRAITE':
+      nbEchecsAvant  = Math.floor(Math.random() * 3)
+      ajouteSucces   = true
+      break
+    case 'EN_ERREUR':
+      nbEchecsAvant  = 1 + Math.floor(Math.random() * 3)
+      break
+    default: // A_TRAITER, EN_TRAITEMENT
+      nbEchecsAvant  = Math.floor(Math.random() * 2)
+  }
+
+  const traitements = []
+  let numero = 1
+  let t = new Date(messageTimestampIso).getTime() + 2 * 60 * 1000 // première tentative peu après création
+
+  for (let i = 0; i < nbEchecsAvant; i++) {
+    traitements.push(makeTraitement(numero++, 'ERREUR', t))
+    t += 12 * 60 * 1000
+  }
+  if (ajouteSucces) {
+    traitements.push(makeTraitement(numero++, 'SUCCES', t))
+  }
+
+  return traitements
+}
+
 // ─── Générateur de messages ───────────────────────────────────────────────────
 let msgId = 1
 
@@ -32,22 +132,15 @@ function makeMessage(direction, status, forceType = null) {
   const maxAge = status === 'EN_ERREUR' ? 2 * 24 * 3600 * 1000 : 7 * 24 * 3600 * 1000
   const ts     = new Date(Date.now() - Math.floor(Math.random() * maxAge)).toISOString()
 
-  const base = {
+  return {
     id,
     direction,
     type,
     statut: status,
     utilisateur: user,
     timestamp: ts,
-    nbRejeux: status === 'EN_ERREUR' ? Math.floor(Math.random() * 5) : 0,
+    traitements: makeTraitements(status, ts),
   }
-
-  if (direction === 'OUTBOX') {
-    base.nbTentativesEnvoi = Math.floor(Math.random() * 4)
-    base.datePublication   = status === 'TRAITE' ? new Date(Date.now() - Math.random() * 3600000).toISOString() : null
-  }
-
-  return base
 }
 
 // ─── Construction du jeu de données ──────────────────────────────────────────
@@ -122,7 +215,9 @@ export function getMessages({
 
   const total = messages.length
   const start = page * pageSize
-  const items = messages.slice(start, start + pageSize)
+  // Liste = MessageSummary : ne comporte pas l'historique des traitements
+  // (réservé au détail), qui n'est chargé qu'à l'ouverture d'un message.
+  const items = messages.slice(start, start + pageSize).map(({ traitements, ...summary }) => summary)
   return { items, total, page, pageSize }
 }
 
@@ -133,8 +228,7 @@ export function getMessage(id) {
 export function replayMessage(id) {
   const msg = getMessage(id)
   if (!msg) return null
-  msg.statut   = 'A_TRAITER'
-  msg.nbRejeux = (msg.nbRejeux ?? 0) + 1
+  msg.statut = 'A_TRAITER'
   return msg
 }
 
