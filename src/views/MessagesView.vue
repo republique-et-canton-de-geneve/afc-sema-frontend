@@ -311,6 +311,16 @@
                 <template #item.timestamp="{ item }">
                   {{ new Date(item.timestamp).toLocaleString('fr-CH', { timeZone: 'Europe/Zurich' }) }}
                 </template>
+                <template #item.type="{ item }">
+                  <v-chip
+                    v-if="isCommande(item.type)"
+                    size="small" label color="deep-purple" variant="tonal"
+                    prepend-icon="mdi-cog-outline"
+                  >
+                    {{ item.type }}
+                  </v-chip>
+                  <span v-else>{{ item.type }}</span>
+                </template>
 
                 <!-- État vide : erreur backend explicite, sinon "aucun résultat" -->
                 <template #no-data>
@@ -413,6 +423,7 @@
 <script setup>
 import { ref, computed, watch, onMounted } from 'vue'
 import { fetchSummary, fetchMessages, fetchMessageTypes, replayBatch, replayByFilter } from '../services/api.js'
+import { isCommande } from '../utils/messageType.js'
 import AutoRefreshControl  from '../components/AutoRefreshControl.vue'
 import StatusChip          from '../components/StatusChip.vue'
 import MessageDetailDrawer from '../components/MessageDetailDrawer.vue'
