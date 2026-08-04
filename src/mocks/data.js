@@ -4,8 +4,10 @@
 export const DOMAIN_ROLE = 'both'
 
 // ─── Types de messages ────────────────────────────────────────────────────────
-const INBOX_TYPES  = ['ORDER_CREATED', 'ORDER_CANCELLED', 'PAYMENT_CONFIRMED', 'PAYMENT_FAILED']
-const OUTBOX_TYPES = ['INVOICE_SENT', 'CREDIT_NOTE_ISSUED', 'REMINDER_SENT']
+// Une commande interne (préfixe "CMD.") est un message à destination de
+// l'application elle-même, par opposition à un domain event.
+const INBOX_TYPES  = ['ORDER_CREATED', 'ORDER_CANCELLED', 'PAYMENT_CONFIRMED', 'PAYMENT_FAILED', 'CMD.RECOMPUTE_INVOICE']
+const OUTBOX_TYPES = ['INVOICE_SENT', 'CREDIT_NOTE_ISSUED', 'REMINDER_SENT', 'CMD.RETRY_PAYMENT']
 
 // ─── Distribution des statuts par direction ───────────────────────────────────
 // Profil "crise" : vague d'erreurs en inbox sur ORDER_CREATED

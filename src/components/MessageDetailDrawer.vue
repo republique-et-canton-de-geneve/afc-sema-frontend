@@ -26,6 +26,19 @@
         <!-- Métadonnées principales -->
         <v-table density="compact" class="mb-4 rounded border">
           <tbody>
+            <tr>
+              <td class="text-medium-emphasis text-body-2 py-2" style="width:40%">Type</td>
+              <td class="text-body-2 py-2 font-weight-medium">
+                <v-chip
+                  v-if="isCommande(current.type)"
+                  size="small" label color="deep-purple" variant="tonal"
+                  prepend-icon="mdi-cog-outline"
+                >
+                  {{ current.type }}
+                </v-chip>
+                <span v-else>{{ current.type }}</span>
+              </td>
+            </tr>
             <tr v-for="row in metaRows" :key="row.label">
               <td class="text-medium-emphasis text-body-2 py-2" style="width:40%">{{ row.label }}</td>
               <td class="text-body-2 py-2 font-weight-medium">{{ row.value ?? '—' }}</td>
@@ -139,6 +152,7 @@
 <script setup>
 import { computed, ref, watch } from 'vue'
 import { fetchMessage, replaySingle } from '../services/api.js'
+import { isCommande } from '../utils/messageType.js'
 import StatusChip from './StatusChip.vue'
 
 const model = defineModel({ type: Boolean, default: false })
@@ -176,7 +190,6 @@ const metaRows = computed(() => {
   const m = current.value
   return [
     { label: 'Direction',   value: m.direction },
-    { label: 'Type',        value: m.type },
     { label: 'Utilisateur', value: m.utilisateur },
     { label: 'Horodatage',  value: formatDate(m.timestamp) },
   ]
